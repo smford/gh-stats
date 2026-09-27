@@ -30,3 +30,9 @@ ignore:
 # Default quality gate threshold: fails workflow if PR risk meets or exceeds this level
 # Options: LOW, MEDIUM, HIGH, CRITICAL
 # fail_on: "CRITICAL"
+
+# DORA & SRE Observability telemetry export
+# export:
+#   json_path: "metrics.json"
+#   webhook_url: "https://metrics.internal/v1/dora"
+#   webhook_secret: "secret-token"

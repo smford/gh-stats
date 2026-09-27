@@ -15,7 +15,15 @@ type Config struct {
 	Thresholds  ThresholdsConfig  `yaml:"thresholds"`
 	BlastRadius BlastRadiusConfig `yaml:"blast_radius"`
 	Ignore      IgnoreConfig      `yaml:"ignore"`
+	Export      ExportConfig      `yaml:"export"`
 	FailOn      string            `yaml:"fail_on"`
+}
+
+// ExportConfig configures telemetry, metrics JSON export, and webhook destinations.
+type ExportConfig struct {
+	JSONPath      string `yaml:"json_path"`
+	WebhookURL    string `yaml:"webhook_url"`
+	WebhookSecret string `yaml:"webhook_secret"`
 }
 
 // ThresholdsConfig configures limits for PR risk scoring and alerts.
@@ -60,6 +68,7 @@ func DefaultConfig() *Config {
 		Ignore: IgnoreConfig{
 			Paths: make([]string, 0),
 		},
+		Export: ExportConfig{},
 	}
 }
 
