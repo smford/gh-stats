@@ -1,0 +1,56 @@
+feat: Semantic Version bump recommendation (--suggest-bump)
+
+## Summary
+This PR introduces the ability to deterministically recommend the next Semantic Version bump (`--suggest-bump` or `--target=release --suggest-bump`) based on Conventional Commits and file diff deltas across releases and pull requests.
+
+It removes guesswork and custom shell regex from CI/CD delivery pipelines, enabling fully automated, repeatable, and standards-compliant SemVer bumping.
+
+### Key Capabilities
+1. Deterministic Bump Evaluation (`pkg/analyzer`):
+- MAJOR: If any breaking changes (`feat!:`, `fix!:`, `refactor!:`, or `BREAKING CHANGE:` in subject/body) or database schema migrations (`*.sql`, `migrations/`) are detected.
+- MINOR: If new features (`feat:`, `feat(...)`) are present without breaking changes.
+- PATCH: If only bug fixes (`fix:`), performance optimizations (`perf:`), documentation (`docs:`), chores (`chore:`), or test additions are present.
+- NONE: If no commits or file changes are detected across the comparison range.
+2. Next Semantic Version Calculator:
+- Computes next SemVer string based on latest repository release tag (e.g. `v0.4.0` + `MINOR` -> `v0.5.0`, `v0.4.0` + `MAJOR` -> `v1.0.0`, `v0.4.0` + `PATCH` -> `v0.4.1`).
+- Preserves SemVer tag formats (with or without `v` prefix).
+3. GitHub Action Integration (`action.yml`):
+- Added input `suggested-bump: 'true'`.
+- Exposes action outputs: `suggested-bump` (e.g. "minor") and `suggested-version` (e.g. "v0.5.0").
+- Also exposes `version`, `version_number`, `is_new_version`, and `major_tag` for direct plug-and-play usage in release workflows.
+4. Release Workflow Automation (`.github/workflows/release.yml`):
+- Updated `Calculate Semantic Version` step to run `go run ./cmd/gh-stats --target=release --suggest-bump`, replacing custom shell regex with deterministic analysis and emitting SRE readiness directly to `$GITHUB_STEP_SUMMARY`.
+5. Local Git Tag Utilities (`pkg/gitutil`):
+- Added `GetLatestTag()` supporting full SemVer ordering via `git tag -l "v*.*.*" --sort=-v:refname`.
+- Added `IsSemverTag()` helper for tag validation.
+6. Documentation & Step Summary Reporting (`pkg/reporter`, `README.md`):
+- Added `Recommended Bump` metric row in Release Step Summary Markdown table.
+- Added comprehensive section in `README.md` detailing CLI usage, Conventional Commit rules, and GitHub Actions integration.
+
+## Changes
+- `pkg/analyzer/semver.go`: Created `CalculateNextVersion()`, `(ReleaseStats).DetermineBump()`, and `(PRStats).DetermineBump()`.
+- `pkg/analyzer/semver_test.go`: Added comprehensive unit and synthetic tests covering major/minor/patch/none bumps, tag calculation, and git repo integration.
+- `pkg/analyzer/release.go`: Added `SuggestedBump` and `SuggestedVersion` fields to `ReleaseStats`, automatically populating them in `AnalyzeRelease()`.
+- `pkg/analyzer/pr.go`: Added `SuggestedBump` and `SuggestedVersion` fields to `PRStats`, automatically populating them in `AnalyzePR()`.
+- `pkg/analyzer/analyzer.go`: Updated Database Migrations sensitive pattern to match `*.sql` files generally.
+- `pkg/gitutil/git.go`: Added `GetLatestTag()` and `IsSemverTag()`.
+- `pkg/gitutil/git_test.go`: Added tests for `GetLatestTag()`, `IsSemverTag()`, and synthetic SemVer tag ordering.
+- `pkg/reporter/markdown.go`: Added `Recommended Bump` row to Release Delta Overview summary table.
+- `cmd/gh-stats/main.go`: Added `--suggest-bump` CLI flag, automated release target defaulting, and exposed GitHub Action outputs.
+- `action.yml`: Declared `suggested-bump` input and `suggested-bump` / `suggested-version` outputs.
+- `.github/workflows/release.yml`: Updated `Calculate Semantic Version` step to run `gh-stats --target=release --suggest-bump`.
+- `scripts/bump-version.sh`: Updated breaking change regex to check SQL migration files.
+- `README.md`: Documented `--suggest-bump` flag, action outputs, and workflow examples.
+
+## Verification
+- `go test -count=1 -race ./...` (All tests passed cleanly with 0 race conditions)
+- `go vet ./...` (Clean, 0 warnings)
+- `shellcheck scripts/*.sh examples/hooks/*` (Clean, 0 errors)
+- CLI execution test:
+```text
+$ gh-stats --suggest-bump
+🔍 gh-stats: running in [RELEASE] mode
+📦 Comparing Release: v0.5.0 ... HEAD
+✅ Release Analysis Complete: Risk=MEDIUM (40/100), Commits=5, Breaking Changes=0, Files=8
+🏷️ Suggested Version Bump: MINOR (current: v0.5.0 ➔ next: v0.6.0)
+```
