@@ -41,6 +41,8 @@ type PRStats struct {
 	RiskLevel            string                   // "LOW", "MEDIUM", "HIGH", "CRITICAL"
 	PrimaryFile          string                   // representative file for PR-wide SARIF results
 	Config               *config.Config           // Active repository configuration
+	SuggestedBump        string                   // "major", "minor", "patch", "none"
+	SuggestedVersion     string                   // e.g. "v0.5.0"
 }
 
 // ReviewerRecommendation represents a suggested code reviewer with domain expertise.
@@ -145,6 +147,17 @@ func AnalyzePR(runner *gitutil.Runner, baseRef, headRef string, cfg *config.Conf
 
 	stats.RecommendedReviewers = findRecommendedReviewers(runner, stats)
 	calculateRisk(stats)
+
+	// Calculate deterministic suggested version bump for PR
+	stats.SuggestedBump = stats.DetermineBump()
+	if runner != nil {
+		if latestTag, err := runner.GetLatestTag(); err == nil && latestTag != "" {
+			if nextVer, err := CalculateNextVersion(latestTag, stats.SuggestedBump); err == nil {
+				stats.SuggestedVersion = nextVer
+			}
+		}
+	}
+
 	return stats, nil
 }
 

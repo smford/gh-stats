@@ -48,6 +48,7 @@ func main() {
 		flagMaxCILatency  int
 		flagFailOnFlaky   bool
 		flagCheckRuns     bool
+		flagSuggestBump   bool
 	)
 
 	flag.StringVar(&flagTarget, "target", getEnvDefault("INPUT_TARGET", getEnvDefault("INPUT_MODE", "auto")), "Target scope: 'pr', 'repo', 'release'/'range', or 'auto'")
@@ -68,6 +69,7 @@ func main() {
 	flag.IntVar(&flagMaxCILatency, "max-ci-latency", 0, "Maximum acceptable CI check latency in minutes (default 15)")
 	flag.BoolVar(&flagFailOnFlaky, "fail-on-flaky", getEnvDefault("INPUT_FAIL_ON_FLAKY", "false") == "true", "Fail quality gate if flaky CI checks are detected")
 	flag.BoolVar(&flagCheckRuns, "check-runs", true, "Fetch CI check runs for latency and flakiness analysis")
+	flag.BoolVar(&flagSuggestBump, "suggest-bump", getEnvDefault("INPUT_SUGGEST_BUMP", "false") == "true", "Deterministically recommend next semantic version bump and version string")
 	flag.BoolVar(&flagQuiet, "quiet", false, "Suppress stdout output")
 	flag.BoolVar(&flagVersion, "version", false, "Print gh-stats version and exit")
 	flag.Parse()
@@ -80,7 +82,9 @@ func main() {
 	// Resolve auto mode
 	target := strings.ToLower(flagTarget)
 	if target == "auto" {
-		if os.Getenv("GITHUB_EVENT_NAME") == "pull_request" || os.Getenv("GITHUB_BASE_REF") != "" {
+		if flagSuggestBump {
+			target = "release"
+		} else if os.Getenv("GITHUB_EVENT_NAME") == "pull_request" || os.Getenv("GITHUB_BASE_REF") != "" {
 			target = "pr"
 		} else if os.Getenv("GITHUB_EVENT_NAME") == "release" {
 			target = "release"
@@ -303,6 +307,14 @@ func main() {
 		baseRef := flagBaseRef
 		headRef := flagHeadRef
 
+		if flagSuggestBump && baseRef == "" && (headRef == "" || headRef == "HEAD") {
+			latestTag, err := runner.GetLatestTag()
+			if err == nil && latestTag != "" {
+				baseRef = latestTag
+				headRef = "HEAD"
+			}
+		}
+
 		// If headRef not provided or is default HEAD, auto-detect from tags
 		if headRef == "" || headRef == "HEAD" {
 			if baseRef == "" {
@@ -396,6 +408,65 @@ func main() {
 		setGithubOutput("release-breaking-count", fmt.Sprintf("%d", len(releaseStats.BreakingChanges)))
 		setGithubOutput("release-risk-level", releaseStats.RiskLevel)
 		setGithubOutput("release-risk-score", fmt.Sprintf("%d", releaseStats.RiskScore))
+	}
+
+	// Compute and expose recommended Semantic Version bump outputs
+	var suggestedBump string
+	var suggestedVersion string
+	var currentVersionTag string
+
+	if releaseStats != nil {
+		suggestedBump = releaseStats.SuggestedBump
+		suggestedVersion = releaseStats.SuggestedVersion
+		currentVersionTag = releaseStats.BaseRef
+		if !gitutil.IsSemverTag(currentVersionTag) {
+			if lt, err := runner.GetLatestTag(); err == nil && lt != "" {
+				currentVersionTag = lt
+			}
+		}
+	} else if prStats != nil {
+		suggestedBump = prStats.SuggestedBump
+		suggestedVersion = prStats.SuggestedVersion
+		if lt, err := runner.GetLatestTag(); err == nil && lt != "" {
+			currentVersionTag = lt
+		}
+	}
+
+	if (suggestedVersion == "" || suggestedVersion == currentVersionTag) && suggestedBump != "" && suggestedBump != analyzer.BumpNone {
+		if nextVer, err := analyzer.CalculateNextVersion(currentVersionTag, suggestedBump); err == nil {
+			suggestedVersion = nextVer
+		}
+	}
+
+	if suggestedBump != "" {
+		isNewVersion := "true"
+		if suggestedBump == analyzer.BumpNone || (currentVersionTag != "" && suggestedVersion == currentVersionTag) {
+			isNewVersion = "false"
+		}
+		versionNum := strings.TrimPrefix(suggestedVersion, "v")
+		majorTag := ""
+		if strings.HasPrefix(suggestedVersion, "v") {
+			parts := strings.Split(suggestedVersion, ".")
+			if len(parts) > 0 {
+				majorTag = parts[0]
+			}
+		}
+
+		setGithubOutput("suggested-bump", suggestedBump)
+		setGithubOutput("suggested_bump", suggestedBump)
+		setGithubOutput("suggested-version", suggestedVersion)
+		setGithubOutput("suggested_version", suggestedVersion)
+		setGithubOutput("version", suggestedVersion)
+		setGithubOutput("version_number", versionNum)
+		setGithubOutput("is_new_version", isNewVersion)
+		if majorTag != "" {
+			setGithubOutput("major_tag", majorTag)
+		}
+
+		if !flagQuiet {
+			fmt.Printf("🏷️ Suggested Version Bump: %s (current: %s ➔ next: %s)\n",
+				strings.ToUpper(suggestedBump), currentVersionTag, suggestedVersion)
+		}
 	}
 
 	if !flagQuiet && os.Getenv("GITHUB_ACTIONS") == "" {

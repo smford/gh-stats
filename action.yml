@@ -66,6 +66,10 @@ inputs:
     description: 'Fail workflow if flaky CI checks are detected on the PR'
     required: false
     default: 'false'
+  suggested-bump:
+    description: 'Calculate and output recommended next Semantic Version bump and version string'
+    required: false
+    default: 'false'
   token:
     description: 'GitHub token for API access or SARIF upload'
     required: false
@@ -102,6 +106,12 @@ outputs:
   release-risk-score:
     description: 'Calculated deployment risk score for the release (0-100)'
     value: ${{ steps.run-stats.outputs.release-risk-score }}
+  suggested-bump:
+    description: 'Recommended Semantic Version bump type ("major", "minor", "patch")'
+    value: ${{ steps.run-stats.outputs.suggested-bump }}
+  suggested-version:
+    description: 'Recommended next Semantic Version string (e.g. "v0.5.0")'
+    value: ${{ steps.run-stats.outputs.suggested-version }}
   target:
     description: 'Resolved target mode (pr, repo, or release)'
     value: ${{ steps.run-stats.outputs.target }}
@@ -132,6 +142,7 @@ runs:
         INPUT_WEBHOOK_SECRET: ${{ inputs.webhook-secret }}
         INPUT_MAX_CI_LATENCY: ${{ inputs.max-ci-latency }}
         INPUT_FAIL_ON_FLAKY: ${{ inputs.fail-on-flaky }}
+        INPUT_SUGGEST_BUMP: ${{ inputs.suggested-bump }}
         INPUT_TOKEN: ${{ inputs.token }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |

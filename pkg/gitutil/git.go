@@ -304,6 +304,59 @@ func (r *Runner) GetReleaseTags() ([]string, error) {
 	return tags, nil
 }
 
+// GetLatestTag returns the most recent SemVer release tag (e.g. "v0.4.0").
+func (r *Runner) GetLatestTag() (string, error) {
+	out, err := r.Exec("tag", "-l", "v*.*.*", "--sort=-v:refname")
+	if err == nil && strings.TrimSpace(out) != "" {
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && IsSemverTag(line) {
+				return line, nil
+			}
+		}
+	}
+
+	// Fallback to GetReleaseTags
+	tags, err := r.GetReleaseTags()
+	if err != nil {
+		return "", err
+	}
+	for _, t := range tags {
+		if IsSemverTag(t) {
+			return t, nil
+		}
+	}
+	if len(tags) > 0 {
+		return tags[0], nil
+	}
+	return "", fmt.Errorf("no release tags found in repository")
+}
+
+// IsSemverTag returns true if tag matches semantic versioning conventions (e.g. v1.2.3 or 1.2.3).
+func IsSemverTag(tag string) bool {
+	t := strings.TrimSpace(tag)
+	if strings.HasPrefix(t, "v") {
+		t = t[1:]
+	}
+	parts := strings.Split(t, ".")
+	if len(parts) < 3 {
+		return false
+	}
+	for i := 0; i < 3; i++ {
+		p := parts[i]
+		if i == 2 {
+			if idx := strings.IndexAny(p, "-+"); idx != -1 {
+				p = p[:idx]
+			}
+		}
+		if _, err := strconv.Atoi(p); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // GetInitialCommit returns the repository's root/first commit SHA.
 func (r *Runner) GetInitialCommit() (string, error) {
 	out, err := r.Exec("rev-list", "--max-parents=0", "HEAD")

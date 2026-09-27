@@ -383,6 +383,69 @@ jobs:
 
 ---
 
+## 🏷️ Deterministic Semantic Version Bump (`--suggest-bump`)
+
+Eliminate guesswork and manually maintained release scripts. `gh-stats` deterministically inspects Conventional Commits and file deltas to recommend the next Semantic Version bump (`major`, `minor`, `patch`) and next release tag:
+
+1. **`MAJOR` Bump:**
+   - Conventional Commit breaking changes (`feat!:`, `fix!:`, `refactor!:`, or `BREAKING CHANGE:` in commit subject/body).
+   - Database schema migrations (`migrations/`, `*.sql`).
+2. **`MINOR` Bump:**
+   - New features introduced (`feat:`, `feat(...)`) without breaking changes.
+3. **`PATCH` Bump:**
+   - Bug fixes (`fix:`), performance optimizations (`perf:`), documentation (`docs:`), chores (`chore:`), or test additions.
+4. **`NONE`:**
+   - No code commits or file differences detected across the comparison window.
+
+### CLI Usage:
+
+```bash
+# Recommend next bump and calculate version from latest release tag to HEAD
+gh-stats --suggest-bump
+
+# Explicitly evaluate release delta against latest release
+gh-stats --target=release --suggest-bump
+
+# Evaluate a specific tag or milestone range
+gh-stats --target=release --base=v0.4.0 --head=HEAD --suggest-bump
+```
+
+Output:
+```text
+🔍 gh-stats: running in [RELEASE] mode
+📦 Comparing Release: v0.4.0 ... HEAD
+✅ Release Analysis Complete: Risk=MEDIUM (40/100), Commits=3, Breaking Changes=0, Files=7
+🏷️ Suggested Version Bump: MINOR (current: v0.4.0 ➔ next: v0.5.0)
+```
+
+### GitHub Action Integration:
+
+```yaml
+- name: Determine Next Release Version
+  id: semver
+  uses: smford/gh-stats@main
+  with:
+    target: release
+    suggested-bump: 'true'
+
+- name: Tag and Release
+  if: steps.semver.outputs.suggested-bump != 'none'
+  run: |
+    echo "Recommended Bump: ${{ steps.semver.outputs.suggested-bump }}"
+    echo "Next Tag: ${{ steps.semver.outputs.suggested-version }}"
+    git tag -a "${{ steps.semver.outputs.suggested-version }}" -m "Release ${{ steps.semver.outputs.suggested-version }}"
+    git push origin "${{ steps.semver.outputs.suggested-version }}"
+```
+
+### GitHub Action Outputs:
+
+| Output | Description | Example |
+| :--- | :--- | :--- |
+| `suggested-bump` | Recommended SemVer bump (`major`, `minor`, `patch`, or `none`) | `minor` |
+| `suggested-version` | Next calculated SemVer release tag | `v0.5.0` |
+
+---
+
 ## 💻 Local CLI Usage
 
 You can build and run `gh-stats` locally on any git repository:
