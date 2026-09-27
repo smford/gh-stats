@@ -4,6 +4,14 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "cmd/**"
+      - "pkg/**"
+      - "action.yml"
+      - "go.mod"
+      - "go.sum"
+      - "scripts/**"
+      - ".gh-stats.yml"
   workflow_dispatch:
 
 permissions:

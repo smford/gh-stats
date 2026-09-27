@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>gh-stats | Production-Grade SRE & Code Reliability Health for GitHub</title>
+  <meta name="description" content="Production-grade GitHub Action and CLI in Go that evaluates PR risk budgets, blast radius detection, CI flakiness, release comparison, and SARIF code scanning.">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Navigation Bar -->
+  <header class="navbar">
+    <div class="nav-container">
+      <a href="#" class="nav-brand">
+        <svg viewBox="0 0 32 32" width="28" height="28" fill="none">
+          <rect width="32" height="32" rx="8" fill="#0f172a"/>
+          <path d="M18 4L8 16h7l-2 12 11-14h-8l2-10z" fill="url(#brandGrad)"/>
+          <defs>
+            <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#3b82f6"/>
+              <stop offset="100%" stop-color="#06b6d4"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <span>gh-stats</span>
+        <span class="brand-badge">{{VERSION}}</span>
+      </a>
+
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#playground">Interactive Demo</a></li>
+        <li><a href="#release-mode">Release Comparison</a></li>
+        <li><a href="#quickstart">Quickstart</a></li>
+        <li><a href="#rules">SARIF Rules</a></li>
+      </ul>
+
+      <div class="nav-actions">
+        <button id="theme-toggle" class="btn-icon" aria-label="Toggle Theme">
+          <svg id="theme-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor">
+            <path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <a href="https://github.com/smford/gh-stats" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="padding: 0.45rem 0.9rem; font-size: 0.85rem;">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+          </svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-pill">
+        <span>🛡️ Production-Grade SRE & Developer Reliability</span>
+      </div>
+      <h1>Stop Blind Merges.<br>Predict Deployment Risk in &lt;2s.</h1>
+      <p>
+        An ultra-fast, zero-heavy-dependency Go CLI and GitHub Action that evaluates Pull Request risk scores (0–100), isolates blast radius, detects CI pipeline flakiness, compares release deltas, and publishes native <strong>SARIF v2.1.0</strong> code scanning alerts.
+      </p>
+
+      <div class="hero-cta">
+        <a href="#quickstart" class="btn btn-primary">
+          <span>Get Started Free</span>
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+        </a>
+        <a href="#playground" class="btn btn-secondary">Try Interactive Playground</a>
+      </div>
+
+      <div>
+        <div class="quick-install-bar">
+          <span>$ brew install smford/homebrew-tap/gh-stats</span>
+          <button class="copy-btn" data-copy="brew install smford/homebrew-tap/gh-stats" title="Copy to clipboard">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"><rect x="9" y="9" width="13" height="13" rx="2" stroke-width="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke-width="2"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Core Features Grid -->
+  <section id="features">
+    <div class="container">
+      <div class="section-header">
+        <h2>Engineered for Modern Engineering Teams</h2>
+        <p>Built for SREs, platform engineers, and developers who refuse to let fragile deployments slip into production.</p>
+      </div>
+
+      <div class="features-grid">
+        <div class="card">
+          <div class="card-icon">🛡️</div>
+          <h3>Predictive SRE Risk Scoring</h3>
+          <p>Combines change volume, test-to-code velocity delta, and blast radius into an actionable 0–100 risk score with quality gates (`--fail-on=HIGH`).</p>
+          <span class="card-tag">PR & CLI Mode</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">💥</div>
+          <h3>Blast Radius Isolation</h3>
+          <p>Instantly flags changes modifying CI/CD workflows (`.github/workflows`), Terraform, Kubernetes manifests, auth logic, or database schema migrations.</p>
+          <span class="card-tag">Automated Guardrails</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">⚡</div>
+          <h3>CI Check Runs Latency & Flakiness</h3>
+          <p>Integrates with the GitHub Check Runs API to uncover critical-path bottlenecks and detect tests with conflicting outcomes across retries on the same commit.</p>
+          <span class="card-tag">API Integration</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">📦</div>
+          <h3>Release Comparison Mode</h3>
+          <p>Compares release tags (`v0.3.0...v0.4.0`), automatically detects breaking changes, extracts conventional changelogs, and generates deployment readiness reports.</p>
+          <span class="card-tag">--target=release</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🪝</div>
+          <h3>Shift-Left Git Hooks</h3>
+          <p>Installs native pre-push and pre-commit hooks to block high-risk code right on developer machines before remote CI runs (`gh-stats hook install`).</p>
+          <span class="card-tag">Local Workstations</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">📊</div>
+          <h3>DORA Telemetry Exporter</h3>
+          <p>Dispatches structured DORA metrics (lead time, risk score, flakiness, test ratio) to JSON files or observability webhooks with HMAC-SHA256 signatures.</p>
+          <span class="card-tag">JSON & Webhooks</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">👥</div>
+          <h3>Domain Expert Review Routing</h3>
+          <p>Analyzes repository commit histories to recommend engineers who actually understand the components touched by the pull request.</p>
+          <span class="card-tag">Intelligent Reviewers</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🏛️</div>
+          <h3>Repository Churn & Bus Factor</h3>
+          <p>Discovers code hotspots frequently involved in regressions and flags high author concentration before key developers leave the team.</p>
+          <span class="card-tag">--target=repo</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">📋</div>
+          <h3>OASIS SARIF v2.1.0 Standard</h3>
+          <p>Outputs compliant SARIF directly into GitHub Code Scanning and renders beautifully structured Markdown tables into `$GITHUB_STEP_SUMMARY`.</p>
+          <span class="card-tag">Code Scanning</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Playground -->
+  <section id="playground" class="playground-section">
+    <div class="container">
+      <div class="section-header">
+        <h2>Interactive SRE Playground</h2>
+        <p>Test risk scoring, release comparison, and CI flakiness detection right in your browser.</p>
+      </div>
+
+      <div class="tabs-nav">
+        <button class="tab-btn active" data-tab="tab-pr">Pull Request Risk Simulator</button>
+        <button class="tab-btn" data-tab="tab-release">Release Comparison Preview</button>
+        <button class="tab-btn" data-tab="tab-ci">CI Pipeline Latency & Flakiness</button>
+        <button class="tab-btn" data-tab="tab-hook">Shift-Left Pre-Push Hook</button>
+      </div>
+
+      <!-- Tab 1: PR Simulator -->
+      <div id="tab-pr" class="tab-content active">
+        <div class="simulator-box">
+          <div class="simulator-controls">
+            <h4>⚙️ Adjust Change Parameters</h4>
+
+            <div class="form-group">
+              <div class="form-label">
+                <span>Lines Added</span>
+                <span id="val-additions" class="rule-code">+450</span>
+              </div>
+              <input type="range" id="sim-additions" min="0" max="2000" step="50" value="450">
+            </div>
+
+            <div class="form-group">
+              <div class="form-label">
+                <span>Lines Deleted</span>
+                <span id="val-deletions" class="rule-code">-60</span>
+              </div>
+              <input type="range" id="sim-deletions" min="0" max="1000" step="20" value="60">
+            </div>
+
+            <div class="form-group">
+              <div class="form-label">
+                <span>Automated Test Lines Added</span>
+                <span id="val-tests" class="rule-code">+20</span>
+              </div>
+              <input type="range" id="sim-tests" min="0" max="1000" step="20" value="20">
+            </div>
+
+            <div class="toggle-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="sim-cicd" checked>
+                <span>Touches CI/CD Workflows (<code>.github/workflows/**</code>)</span>
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="sim-db">
+                <span>Touches Database Migrations (<code>migrations/*.sql</code>)</span>
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="sim-auth">
+                <span>Touches Auth / Security Logic (<code>pkg/auth/**</code>)</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="simulator-preview">
+            <div>
+              <div class="risk-gauge-card">
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Calculated Risk Score</div>
+                  <div id="risk-score-val" style="font-size: 1.5rem; font-weight: 700;">65 / 100</div>
+                </div>
+                <div id="risk-level-badge" class="risk-level-badge risk-high">HIGH</div>
+              </div>
+
+              <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase;">
+                Generated Step Summary & SARIF Findings:
+              </div>
+              <div id="simulator-output" class="preview-output">Loading...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Release Comparison Preview -->
+      <div id="tab-release" class="tab-content">
+        <div class="terminal-window">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot-red"></span>
+              <span class="dot-yellow"></span>
+              <span class="dot-green"></span>
+            </div>
+            <span class="terminal-title">gh-stats --target=release (v0.3.0 ... v0.4.0)</span>
+            <span></span>
+          </div>
+          <div class="terminal-body">
+<span style="color: #38bdf8;">$ gh-stats --target=release</span>
+🔍 gh-stats: running in [RELEASE] mode
+📦 Comparing Release: v0.3.0 ... v0.4.0
+✅ Release Analysis Complete: Risk=MEDIUM (40/100), Commits=3, Breaking Changes=1, Files=17
+
+<span style="color: #10b981;"># 📦 GitHub Stats: Release Comparison (`v0.3.0...v0.4.0`)</span>
+> **Release Deployment Risk:** `MEDIUM` (Score: **40 / 100**) 🛡️
+
+## 📊 Release Delta Overview
+| Metric | Value |
+| :--- | :--- |
+| **Comparison Range** | `v0.3.0` ... `v0.4.0` |
+| **Commits** | `3` |
+| **Contributors** | `2` unique author(s) |
+| **Lines Added / Deleted** | `+885` / `-25` (Net: `+860`) |
+| **Test vs Code Delta** | `+245` test lines / `+554` code lines (44.2%) |
+
+## ⚠️ Breaking Changes & Schema Migrations
+| Commit | Description | Type |
+| :--- | :--- | :--- |
+| `959165b` | feat!: break backward compatibility in check runs payload | `conventional_commit` |
+
+## 📝 Release Changelog
+### 🚀 Features
+- [`959165b`] feat: CI Pipeline Latency & Flakiness Detection (@smford)
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 3: CI Flakiness Preview -->
+      <div id="tab-ci" class="tab-content">
+        <div class="terminal-window">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot-red"></span>
+              <span class="dot-yellow"></span>
+              <span class="dot-green"></span>
+            </div>
+            <span class="terminal-title">GitHub Check Runs API Telemetry</span>
+            <span></span>
+          </div>
+          <div class="terminal-body">
+<span style="color: #38bdf8;">## ⚡ CI Pipeline Latency & Reliability (Check Runs)</span>
+
+| Metric | Value |
+| :--- | :--- |
+| **Check Runs Evaluated** | `5` total (`4` passed, `1` failed) |
+| **Cumulative CI Runtime** | `24m 12s` |
+| **Critical Path Bottleneck** | `E2E Cypress Tests` (`18m 20s`) |
+| **Flaky Checks** | <span style="color: #ef4444; font-weight: bold;">🚨 1 detected</span> |
+
+### ⚠️ Flaky & Retried Checks
+| Check Run | Retries | Initial Outcome | Final Outcome | Verdict |
+| :--- | :---: | :---: | :---: | :--- |
+| `Integration Suite` | 1 | `failure` | `success` | <span style="color: #f59e0b; font-weight: bold;">🚨 Flaky</span> (Passed on retry without code changes) |
+
+<span style="color: #ef4444;">❌ Quality Gate Failed: 1 flaky CI check run detected on commit 959165b (--fail-on-flaky)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 4: Shift-Left Hook -->
+      <div id="tab-hook" class="tab-content">
+        <div class="terminal-window">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot-red"></span>
+              <span class="dot-yellow"></span>
+              <span class="dot-green"></span>
+            </div>
+            <span class="terminal-title">Shift-Left Local Pre-Push Guardrail</span>
+            <span></span>
+          </div>
+          <div class="terminal-body">
+<span style="color: #38bdf8;">$ git push origin feature/payments</span>
+🔍 gh-stats: Running shift-left pre-push risk evaluation against [origin/main]...
+📊 Risk Rating: <span style="color: #ef4444; font-weight: bold;">HIGH</span> (Score: 70/100) | Files: 8 | +380 / -45
+🚨 Sensitive Files (2):
+   • .github/workflows/deploy.yml (CI/CD Pipelines)
+   • migrations/004_accounts.sql (Database Migrations)
+
+<span style="color: #ef4444; font-weight: bold;">❌ PUSH BLOCKED: Risk level [HIGH] meets or exceeds threshold [HIGH] (Score: 70/100)</span>
+💡 SRE Shift-Left Guidance:
+   • Add automated tests for the +380 lines of newly added code.
+   • Sensitive infrastructure, security, or database migration files were modified.
+💡 To bypass this check in emergencies:
+   git push --no-verify
+   OR: SKIP_GH_STATS=1 git push
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Release Comparison Mode Section -->
+  <section id="release-mode">
+    <div class="container">
+      <div class="section-header">
+        <h2>📦 Release Comparison Mode</h2>
+        <p>Automate release readiness audits, verify breaking change disclosures, and prevent unintended regressions.</p>
+      </div>
+
+      <div class="features-grid">
+        <div class="card">
+          <div class="card-icon">🏷️</div>
+          <h3>Smart Tag Auto-Detection</h3>
+          <p>Running <code>gh-stats --target=release</code> automatically determines the latest two SemVer release tags (e.g. <code>v0.3.0</code> and <code>v0.4.0</code>) and compares the delta with zero configuration.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">💥</div>
+          <h3>Breaking Change Detection</h3>
+          <p>Parses Conventional Commits breaking changes (<code>feat!:</code>, <code>fix!:</code>, <code>BREAKING CHANGE:</code>) and SQL schema migrations across the entire release window.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">📝</div>
+          <h3>Instant Changelog Generation</h3>
+          <p>Groups commits into Features (🚀), Bug Fixes (🐛), Performance (⚡), and Refactorings (🛠️), formatted cleanly for GitHub Releases and deployment tickets.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Quickstart Guide -->
+  <section id="quickstart">
+    <div class="container">
+      <div class="section-header">
+        <h2>Get Started in Seconds</h2>
+        <p>Deploy in GitHub Actions, install via Homebrew, or integrate shift-left git hooks locally.</p>
+      </div>
+
+      <div class="terminal-window">
+        <div class="terminal-header">
+          <span class="terminal-title">.github/workflows/pr-stats.yml</span>
+          <button class="copy-btn" data-copy="name: PR Reliability & Stats
+on:
+  pull_request:
+    branches: [ main ]
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+jobs:
+  gh-stats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: smford/gh-stats@main
+        with:
+          target: pr
+          comment-pr: 'true'
+          fail-on: 'CRITICAL'
+          token: ${{ secrets.GITHUB_TOKEN }}" title="Copy workflow">
+            Copy Code
+          </button>
+        </div>
+        <div class="terminal-body">
+<span style="color: #64748b;"># .github/workflows/pr-stats.yml</span>
+<span style="color: #38bdf8;">name:</span> PR Reliability & Stats
+
+<span style="color: #38bdf8;">on:</span>
+  <span style="color: #38bdf8;">pull_request:</span>
+    <span style="color: #38bdf8;">branches:</span> [ main ]
+
+<span style="color: #38bdf8;">permissions:</span>
+  <span style="color: #38bdf8;">contents:</span> read
+  <span style="color: #38bdf8;">security-events:</span> write   <span style="color: #64748b;"># Uploads SARIF to GitHub Code Scanning</span>
+  <span style="color: #38bdf8;">pull-requests:</span> write     <span style="color: #64748b;"># Posts sticky summary comment</span>
+
+<span style="color: #38bdf8;">jobs:</span>
+  <span style="color: #38bdf8;">gh-stats:</span>
+    <span style="color: #38bdf8;">runs-on:</span> ubuntu-latest
+    <span style="color: #38bdf8;">steps:</span>
+      - <span style="color: #38bdf8;">uses:</span> actions/checkout@v4
+        <span style="color: #38bdf8;">with:</span>
+          <span style="color: #38bdf8;">fetch-depth:</span> 0  <span style="color: #64748b;"># Required for full git diff analysis</span>
+
+      - <span style="color: #38bdf8;">uses:</span> smford/gh-stats@main
+        <span style="color: #38bdf8;">with:</span>
+          <span style="color: #38bdf8;">target:</span> pr
+          <span style="color: #38bdf8;">comment-pr:</span> 'true'
+          <span style="color: #38bdf8;">fail-on:</span> 'CRITICAL'
+          <span style="color: #38bdf8;">token:</span> ${{ secrets.GITHUB_TOKEN }}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SARIF Rules Reference -->
+  <section id="rules">
+    <div class="container">
+      <div class="section-header">
+        <h2>🏷️ Standards-Compliant SARIF Rules</h2>
+        <p>Published directly to GitHub Security Code Scanning tab for automated auditability.</p>
+        <div style="margin-top: 1.5rem; max-width: 400px; margin-left: auto; margin-right: auto;">
+          <input type="text" id="rules-search" placeholder="Search rules (e.g. blast, size, release)..." style="width: 100%; padding: 0.65rem 1rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); color: var(--text-primary); font-family: var(--font-sans);">
+        </div>
+      </div>
+
+      <div class="table-wrapper">
+        <table id="rules-table">
+          <thead>
+            <tr>
+              <th>Rule ID</th>
+              <th>Severity</th>
+              <th>Scope</th>
+              <th>Condition & Guidance</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="rule-code">GHSTATS001-PR-SUMMARY</td>
+              <td><span class="risk-level-badge risk-low">NOTE</span></td>
+              <td>PR</td>
+              <td>Overall SRE health scorecard, lines added/deleted, test-to-code velocity delta.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS002-PR-SIZE</td>
+              <td><span class="risk-level-badge risk-high">WARNING</span></td>
+              <td>PR</td>
+              <td>PR exceeds size limits (&gt;800 lines), elevating cognitive review fatigue and outage risk.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS003-PR-TEST-RATIO</td>
+              <td><span class="risk-level-badge risk-high">WARNING</span></td>
+              <td>PR</td>
+              <td>Significant production logic changed without corresponding automated test delta.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS004-PR-BLAST-RADIUS</td>
+              <td><span class="risk-level-badge risk-high">WARNING</span></td>
+              <td>PR</td>
+              <td>Modifications to CI/CD workflows, Terraform/k8s manifests, auth, or DB schema migrations.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS005-PR-STALE</td>
+              <td><span class="risk-level-badge risk-med">WARNING</span></td>
+              <td>PR</td>
+              <td>PR open &gt;14 days, indicating branch drift, painful merge conflicts, and delayed lead time.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS006-PR-DISCUSSION-CHURN</td>
+              <td><span class="risk-level-badge risk-low">NOTE</span></td>
+              <td>PR</td>
+              <td>High comment volume (&gt;15 comments) signalling review friction or architectural ambiguity.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS007-PR-REVIEWERS</td>
+              <td><span class="risk-level-badge risk-low">NOTE</span></td>
+              <td>PR</td>
+              <td>Domain experts recommended to review modified files based on historical commit patterns.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS008-PR-CI-LATENCY</td>
+              <td><span class="risk-level-badge risk-high">WARNING</span></td>
+              <td>PR</td>
+              <td>CI check run exceeds latency threshold (&gt;15 min), inflating developer turnaround times.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS009-PR-CI-FLAKINESS</td>
+              <td><span class="risk-level-badge risk-high">WARNING</span></td>
+              <td>PR</td>
+              <td>Check run failed initially but passed on retry on the exact same commit SHA without code changes.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS101-REPO-SUMMARY</td>
+              <td><span class="risk-level-badge risk-low">NOTE</span></td>
+              <td>Repo</td>
+              <td>Repository architecture summary, test density percentage, and language distribution.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS102-REPO-HOTSPOTS</td>
+              <td><span class="risk-level-badge risk-low">NOTE</span></td>
+              <td>Repo</td>
+              <td>Frequently modified files identified across historical commit logs (churn hotspots).</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS103-REPO-BUS-FACTOR</td>
+              <td><span class="risk-level-badge risk-high">WARNING</span></td>
+              <td>Repo</td>
+              <td>Single contributor accounts for &gt;75% of commits, highlighting knowledge silo risk.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS201-RELEASE-SUMMARY</td>
+              <td><span class="risk-level-badge risk-low">NOTE</span></td>
+              <td>Release</td>
+              <td>Release comparison delta, velocity metrics, conventional changelog, and readiness summary.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS202-RELEASE-BREAKING</td>
+              <td><span class="risk-level-badge risk-crit">WARNING</span></td>
+              <td>Release</td>
+              <td>Breaking changes (<code>feat!:</code>, <code>BREAKING CHANGE:</code>) or database schema migrations detected.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS203-RELEASE-BLAST-RADIUS</td>
+              <td><span class="risk-level-badge risk-high">WARNING</span></td>
+              <td>Release</td>
+              <td>Modifications to critical deployment pipelines, cloud infrastructure, or security modules.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div class="footer-links">
+        <a href="https://github.com/smford/gh-stats" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+        <a href="https://github.com/smford/homebrew-tap" target="_blank" rel="noopener noreferrer">Homebrew Tap</a>
+        <a href="https://github.com/smford/gh-stats/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+      </div>
+      <p>© 2026 smford / gh-stats. Open source under the MIT License.</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

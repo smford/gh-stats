@@ -2,6 +2,8 @@
 
 A production-grade GitHub Action and CLI tool written in Go that generates deep **SRE & developer reliability statistics** for Pull Requests or entire repositories, outputting standards-compliant **SARIF v2.1.0** reports directly into GitHub Code Scanning.
 
+🌐 **Documentation & Live Playground:** [smford.github.io/gh-stats](https://smford.github.io/gh-stats/)
+
 ---
 
 ## 🎯 Why gh-stats? (An SRE & Senior Developer Perspective)
