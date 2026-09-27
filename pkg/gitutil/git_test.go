@@ -177,3 +177,78 @@ func TestSyntheticTagOrdering(t *testing.T) {
 	}
 }
 
+func TestGetAheadBehind(t *testing.T) {
+	tempDir := t.TempDir()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = tempDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v (output: %s)", args, err, string(out))
+		}
+	}
+
+	runGit("init", "-b", "main")
+	runGit("config", "user.name", "Drift Tester")
+	runGit("config", "user.email", "drift@example.com")
+	runGit("config", "commit.gpgsign", "false")
+
+	// Commit 1 on main
+	_ = os.WriteFile(filepath.Join(tempDir, "base.txt"), []byte("base"), 0644)
+	runGit("add", "base.txt")
+	runGit("commit", "-m", "initial commit")
+
+	// Create and checkout staging
+	runGit("checkout", "-b", "staging")
+
+	// Commit 2 and 3 on staging
+	_ = os.WriteFile(filepath.Join(tempDir, "staging1.txt"), []byte("1"), 0644)
+	runGit("add", "staging1.txt")
+	runGit("commit", "-m", "staging commit 1")
+
+	_ = os.WriteFile(filepath.Join(tempDir, "staging2.txt"), []byte("2"), 0644)
+	runGit("add", "staging2.txt")
+	runGit("commit", "-m", "staging commit 2")
+
+	// Switch back to main and make 1 commit
+	runGit("checkout", "main")
+	_ = os.WriteFile(filepath.Join(tempDir, "main_hotfix.txt"), []byte("hotfix"), 0644)
+	runGit("add", "main_hotfix.txt")
+	runGit("commit", "-m", "main hotfix")
+
+	runner := NewRunner(tempDir)
+
+	// Check ahead/behind: staging vs main
+	ahead, behind, err := runner.GetAheadBehind("main", "staging")
+	if err != nil {
+		t.Fatalf("GetAheadBehind failed: %v", err)
+	}
+	if ahead != 2 {
+		t.Errorf("expected staging to be 2 commits ahead of main, got %d", ahead)
+	}
+	if behind != 1 {
+		t.Errorf("expected staging to be 1 commit behind main, got %d", behind)
+	}
+
+	// Reverse check: main vs staging
+	aheadRev, behindRev, err := runner.GetAheadBehind("staging", "main")
+	if err != nil {
+		t.Fatalf("GetAheadBehind reverse failed: %v", err)
+	}
+	if aheadRev != 1 {
+		t.Errorf("expected main to be 1 commit ahead of staging, got %d", aheadRev)
+	}
+	if behindRev != 2 {
+		t.Errorf("expected main to be 2 commits behind staging, got %d", behindRev)
+	}
+
+	// Equal branches
+	aheadSame, behindSame, err := runner.GetAheadBehind("main", "main")
+	if err != nil {
+		t.Fatalf("GetAheadBehind equal failed: %v", err)
+	}
+	if aheadSame != 0 || behindSame != 0 {
+		t.Errorf("expected 0 ahead and 0 behind for identical branch, got ahead=%d, behind=%d", aheadSame, behindSame)
+	}
+}
+
+

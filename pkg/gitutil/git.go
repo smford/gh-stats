@@ -209,6 +209,24 @@ func (r *Runner) GetCommits(baseRef, headRef string) ([]CommitInfo, error) {
 	return commits, nil
 }
 
+// GetAheadBehind returns the number of commits headRef is ahead of baseRef (unpromoted commits)
+// and behind baseRef (upstream divergence).
+func (r *Runner) GetAheadBehind(baseRef, headRef string) (ahead, behind int, err error) {
+	out, err := r.Exec("rev-list", "--left-right", "--count", fmt.Sprintf("%s...%s", baseRef, headRef))
+	if err != nil {
+		return 0, 0, err
+	}
+	parts := strings.Fields(strings.TrimSpace(out))
+	if len(parts) >= 2 {
+		b, err1 := strconv.Atoi(parts[0])
+		a, err2 := strconv.Atoi(parts[1])
+		if err1 == nil && err2 == nil {
+			return a, b, nil
+		}
+	}
+	return 0, 0, fmt.Errorf("unexpected rev-list --left-right --count output: %q", out)
+}
+
 // GetFileChurnFrequency returns the most frequently modified files over recent commits.
 func (r *Runner) GetFileChurnFrequency(commitLimit int) (map[string]int, error) {
 	out, err := r.Exec("log", fmt.Sprintf("-n%d", commitLimit), "--name-only", "--format=")

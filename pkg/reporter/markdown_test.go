@@ -7,6 +7,7 @@ import (
 
 	"github.com/smford/gh-stats/pkg/analyzer"
 	"github.com/smford/gh-stats/pkg/github"
+	"github.com/smford/gh-stats/pkg/gitutil"
 )
 
 func TestGeneratePRSummary(t *testing.T) {
@@ -137,4 +138,65 @@ func TestGenerateReleaseSummary(t *testing.T) {
 		t.Errorf("expected contributors in summary, got: %s", summary)
 	}
 }
+
+func TestGenerateDriftSummary(t *testing.T) {
+	stats := &analyzer.DriftStats{
+		BaseRef:        "origin/production",
+		HeadRef:        "origin/staging",
+		CommitsAhead:  8,
+		CommitsBehind: 2,
+		TotalAdditions: 450,
+		TotalDeletions: 30,
+		NetChange:      420,
+		FilesChanged:   6,
+		RiskScore:      65,
+		RiskLevel:      "HIGH",
+		BreakingChanges: []analyzer.BreakingChange{
+			{CommitHash: "c0ffee1", Subject: "feat!: breaking API v2 overhaul", Reason: "conventional_commit"},
+		},
+		SensitiveFiles: []analyzer.SensitiveMatch{
+			{Path: "migrations/002_orders.sql", Category: "Database Migrations", Additions: 30, Deletions: 0},
+		},
+		UnpromotedCommits: []gitutil.CommitInfo{
+			{Hash: "c0ffee1", Author: "Charlie", Subject: "feat!: breaking API v2 overhaul"},
+		},
+	}
+
+	summary := GenerateDriftSummary(stats)
+
+	if !strings.Contains(summary, "# 🌐 Environment Drift & Promotion Assessment") {
+		t.Errorf("expected header in summary, got: %s", summary)
+	}
+	if !strings.Contains(summary, "origin/production") || !strings.Contains(summary, "origin/staging") {
+		t.Errorf("expected environments in summary, got: %s", summary)
+	}
+	if !strings.Contains(summary, "HIGH") {
+		t.Errorf("expected HIGH risk rating, got: %s", summary)
+	}
+	if !strings.Contains(summary, "`8` commit(s) awaiting promotion") {
+		t.Errorf("expected commits ahead in summary, got: %s", summary)
+	}
+	if !strings.Contains(summary, "Unpromoted Breaking Changes & Migrations") {
+		t.Errorf("expected breaking changes section, got: %s", summary)
+	}
+	if !strings.Contains(summary, "Unpromoted High Blast Radius Files") {
+		t.Errorf("expected high blast radius section, got: %s", summary)
+	}
+
+	// Test In-Sync summary
+	syncStats := &analyzer.DriftStats{
+		BaseRef:       "origin/production",
+		HeadRef:       "origin/staging",
+		CommitsAhead:  0,
+		CommitsBehind: 0,
+		FilesChanged:  0,
+		RiskScore:     0,
+		RiskLevel:     "LOW",
+	}
+	syncSummary := GenerateDriftSummary(syncStats)
+	if !strings.Contains(syncSummary, "Environments are in sync!") {
+		t.Errorf("expected in-sync notice, got: %s", syncSummary)
+	}
+}
+
 

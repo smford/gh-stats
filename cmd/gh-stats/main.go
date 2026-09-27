@@ -53,7 +53,7 @@ func main() {
 		flagReleaseTag          string
 	)
 
-	flag.StringVar(&flagTarget, "target", getEnvDefault("INPUT_TARGET", getEnvDefault("INPUT_MODE", "auto")), "Target scope: 'pr', 'repo', 'release'/'range', or 'auto'")
+	flag.StringVar(&flagTarget, "target", getEnvDefault("INPUT_TARGET", getEnvDefault("INPUT_MODE", "auto")), "Target scope: 'pr', 'repo', 'release'/'range', 'drift', or 'auto'")
 	flag.StringVar(&flagBaseRef, "base", getEnvDefault("INPUT_BASE_REF", os.Getenv("GITHUB_BASE_REF")), "Base ref for PR or release comparison (e.g. origin/main or v0.3.0)")
 	flag.StringVar(&flagHeadRef, "head", getEnvDefault("INPUT_HEAD_REF", "HEAD"), "Head ref for PR or release comparison (default HEAD)")
 	flag.StringVar(&flagOutput, "output", getEnvDefault("INPUT_SARIF_OUTPUT", getEnvDefault("INPUT_OUTPUT", "gh-stats.sarif")), "Path to output SARIF file")
@@ -154,6 +154,7 @@ func main() {
 	var prStats *analyzer.PRStats
 	var repoStats *analyzer.RepoStats
 	var releaseStats *analyzer.ReleaseStats
+	var driftStats *analyzer.DriftStats
 
 	switch target {
 	case "pr":
@@ -358,11 +359,6 @@ func main() {
 		stats.PopulateSARIF(builder)
 		markdownSummary = reporter.GenerateReleaseSummary(stats)
 
-		if !flagQuiet {
-			fmt.Printf("✅ Release Analysis Complete: Risk=%s (%d/100), Commits=%d, Breaking Changes=%d, Files=%d, Additions=+%d, Deletions=-%d\n",
-				stats.RiskLevel, stats.RiskScore, stats.TotalCommits, len(stats.BreakingChanges), stats.FilesChanged, stats.TotalAdditions, stats.TotalDeletions)
-		}
-
 		// Optional Publish/Update Release Notes on GitHub
 		if flagPublishReleaseNotes {
 			if ghClient == nil || repoSlug == "" {
@@ -409,8 +405,68 @@ func main() {
 			}
 		}
 
+		if !flagQuiet {
+			fmt.Printf("✅ Release Analysis Complete: Risk=%s (%d/100), Commits=%d, Breaking Changes=%d, Files=%d, Additions=+%d, Deletions=-%d\n",
+				stats.RiskLevel, stats.RiskScore, stats.TotalCommits, len(stats.BreakingChanges), stats.FilesChanged, stats.TotalAdditions, stats.TotalDeletions)
+		}
+
+	case "drift":
+		baseRef := flagBaseRef
+		headRef := flagHeadRef
+
+		if baseRef == "" {
+			if _, err := runner.Exec("rev-parse", "--verify", "origin/production"); err == nil {
+				baseRef = "origin/production"
+			} else if _, err := runner.Exec("rev-parse", "--verify", "production"); err == nil {
+				baseRef = "production"
+			} else {
+				baseRef = runner.GetDefaultBaseRef()
+			}
+		} else {
+			if !strings.HasPrefix(baseRef, "origin/") && baseRef != "HEAD" && !strings.HasPrefix(baseRef, "HEAD~") {
+				if _, err := runner.Exec("rev-parse", "--verify", "origin/"+baseRef); err == nil {
+					baseRef = "origin/" + baseRef
+				}
+			}
+		}
+
+		if headRef == "" || headRef == "HEAD" {
+			if _, err := runner.Exec("rev-parse", "--verify", "origin/staging"); err == nil {
+				headRef = "origin/staging"
+			} else if _, err := runner.Exec("rev-parse", "--verify", "staging"); err == nil {
+				headRef = "staging"
+			} else {
+				headRef = "HEAD"
+			}
+		} else {
+			if !strings.HasPrefix(headRef, "origin/") && headRef != "HEAD" && !strings.HasPrefix(headRef, "HEAD~") {
+				if _, err := runner.Exec("rev-parse", "--verify", "origin/"+headRef); err == nil {
+					headRef = "origin/" + headRef
+				}
+			}
+		}
+
+		if !flagQuiet {
+			fmt.Printf("🌐 Auditing Environment Drift: %s (target) ➔ %s (candidate)\n", baseRef, headRef)
+		}
+
+		stats, err := analyzer.AnalyzeDrift(runner, baseRef, headRef, cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error auditing environment drift: %v\n", err)
+			os.Exit(1)
+		}
+		driftStats = stats
+
+		stats.PopulateSARIF(builder)
+		markdownSummary = reporter.GenerateDriftSummary(stats)
+
+		if !flagQuiet {
+			fmt.Printf("✅ Drift Audit Complete: Promotion Risk=%s (%d/100), Commits Ahead=%d, Commits Behind=%d, Files=%d, Additions=+%d, Deletions=-%d\n",
+				stats.RiskLevel, stats.RiskScore, stats.CommitsAhead, stats.CommitsBehind, stats.FilesChanged, stats.TotalAdditions, stats.TotalDeletions)
+		}
+
 	default:
-		fmt.Fprintf(os.Stderr, "❌ Invalid target '%s'. Supported targets are 'pr', 'repo', 'release', or 'range'.\n", target)
+		fmt.Fprintf(os.Stderr, "❌ Invalid target '%s'. Supported targets are 'pr', 'repo', 'release', 'range', or 'drift'.\n", target)
 		os.Exit(1)
 	}
 
@@ -458,6 +514,16 @@ func main() {
 		setGithubOutput("release-breaking-count", fmt.Sprintf("%d", len(releaseStats.BreakingChanges)))
 		setGithubOutput("release-risk-level", releaseStats.RiskLevel)
 		setGithubOutput("release-risk-score", fmt.Sprintf("%d", releaseStats.RiskScore))
+	}
+	if driftStats != nil {
+		setGithubOutput("drift-base-ref", driftStats.BaseRef)
+		setGithubOutput("drift-head-ref", driftStats.HeadRef)
+		setGithubOutput("drift-commits-ahead", fmt.Sprintf("%d", driftStats.CommitsAhead))
+		setGithubOutput("drift-commits-behind", fmt.Sprintf("%d", driftStats.CommitsBehind))
+		setGithubOutput("drift-breaking-count", fmt.Sprintf("%d", len(driftStats.BreakingChanges)))
+		setGithubOutput("drift-sensitive-count", fmt.Sprintf("%d", len(driftStats.SensitiveFiles)))
+		setGithubOutput("drift-risk-level", driftStats.RiskLevel)
+		setGithubOutput("drift-risk-score", fmt.Sprintf("%d", driftStats.RiskScore))
 	}
 
 	// Compute and expose recommended Semantic Version bump outputs
@@ -531,6 +597,8 @@ func main() {
 		metricsPayload = exporter.NewRepoPayload(repoStats, repoSlug)
 	} else if releaseStats != nil {
 		metricsPayload = exporter.NewReleasePayload(releaseStats, repoSlug)
+	} else if driftStats != nil {
+		metricsPayload = exporter.NewDriftPayload(driftStats, repoSlug)
 	}
 
 	if metricsPayload != nil {
@@ -571,6 +639,12 @@ func main() {
 		if analyzer.IsRiskThresholdMet(releaseStats.RiskLevel, flagFailOn) {
 			fmt.Fprintf(os.Stderr, "❌ Quality Gate Failed: Release deployment risk level [%s] meets or exceeds fail-on threshold [%s]\n",
 				releaseStats.RiskLevel, strings.ToUpper(flagFailOn))
+			os.Exit(2)
+		}
+	} else if target == "drift" && driftStats != nil && flagFailOn != "" {
+		if analyzer.IsRiskThresholdMet(driftStats.RiskLevel, flagFailOn) {
+			fmt.Fprintf(os.Stderr, "❌ Quality Gate Failed: Environment drift promotion risk level [%s] meets or exceeds fail-on threshold [%s]\n",
+				driftStats.RiskLevel, strings.ToUpper(flagFailOn))
 			os.Exit(2)
 		}
 	}

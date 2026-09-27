@@ -1,49 +1,59 @@
-feat: publish and update GitHub Release notes with SRE summary (--publish-release-notes)
+feat: Environment Drift & Promotion Audit mode (--target=drift)
 
 ## Summary
-This PR adds the ability to automatically publish or update GitHub Release notes using the generated SRE release summary (`--publish-release-notes`), providing rich, production-grade release documentation directly in GitHub Releases.
+This PR introduces the Environment Drift & Promotion Audit mode (`--target=drift`), providing teams with automated SRE intelligence and risk evaluation before promoting changes between deployment environments (such as staging to production).
 
-When deploying a release, manually drafting release notes or relying on basic git commit logs often leaves users and SREs blind to breaking changes, database migrations, and pipeline blast radius. This feature integrates `gh-stats` directly with the GitHub Releases API to publish structured, audit-ready release documentation.
+In continuous delivery workflows, long-lived branch divergence between environments frequently leads to high-risk batch releases, unpromoted database migrations, and deployment failures. With `--target=drift`, `gh-stats` audits ahead/behind commit divergence, unpromoted sensitive infrastructure and schema changes, calculates a promotion deployment risk score (0-100), emits SARIF security findings, exports DORA metrics, and renders rich Markdown step summaries.
 
 ### Key Capabilities
-1. GitHub Releases API Client (`pkg/github`):
-- `GetReleaseByTag`: Retrieves an existing release by tag name (`GET /repos/{owner}/{repo}/releases/tags/{tag}`).
-- `GetReleaseByID`: Retrieves a release by its numeric ID (`GET /repos/{owner}/{repo}/releases/{id}`).
-- `CreateRelease`: Creates a new release (`POST /repos/{owner}/{repo}/releases`).
-- `UpdateRelease`: Updates release body or details (`PATCH /repos/{owner}/{repo}/releases/{id}`).
-- `PublishOrUpdateReleaseNotes`: Intelligent high-level helper that inspects if a release already exists for the tag. If present, it non-destructively preserves existing binary download links or custom headers and updates the SRE release notes section (`<!-- gh-stats-release-notes -->`). If no release exists, it creates one.
-2. CLI Flags (`cmd/gh-stats`):
-- `--publish-release-notes`: Enables publishing or updating GitHub release notes with the SRE release summary.
-- `--release-tag`: Target release tag for publishing release notes. If omitted, automatically detects the tag from GitHub Actions environment (`GITHUB_REF_NAME`, `GITHUB_REF`), release delta `HeadRef`, `SuggestedVersion`, or repository tags.
-- Automatically resolves target mode to `release` when `--publish-release-notes` is provided without explicit target.
-3. GitHub Action Integration (`action.yml`):
-- Added input `publish-release-notes: true/false`.
-- Added input `release-tag`.
-- Exposes step outputs `release-id` and `release-url`.
-4. Comprehensive Release Documentation:
-- Includes overall SRE deployment risk score and qualitative risk rating.
-- Includes Release Delta Overview table (additions, deletions, net delta, file breakdown, recommended bump).
-- Highlights Breaking Changes and database schema migrations (`*.sql`, `migrations/`).
-- Generates categorized Conventional Commits changelog (Features 🚀, Bug Fixes 🐛, Performance ⚡, Refactoring 🛠️).
-- Identifies modified High Blast Radius infrastructure, CI/CD, and security files.
-- Lists Release Contributors with commit counts and contribution shares.
-5. Unit Tests and Mocks (`pkg/github/client_test.go`):
-- Added unit tests with mock HTTP test servers for `GetReleaseByTag`, `GetReleaseByID`, `CreateRelease`, `UpdateRelease`, and `PublishOrUpdateReleaseNotes` (both create-new and update-existing scenarios).
-6. Demonstration Workflow (`.github/workflows/publish-release-notes.yml`):
-- Created a manually triggered (`workflow_dispatch`) GitHub Action workflow demonstrating release notes generation and publishing with configurable inputs (`release_tag`, `base_ref`, `head_ref`).
-7. Documentation:
-- Updated `README.md` with CLI commands and a complete GitHub Actions release publishing workflow.
+1. Environment Drift Audit CLI (`cmd/gh-stats`):
+- Added `--target=drift` mode comparing target base environment (e.g. `--base=origin/production`) with candidate source environment (e.g. `--head=origin/staging`).
+- Automated branch resolution with sensible defaults and remote prefix handling (`origin/production`, `origin/staging`, `HEAD`).
+- Quality gate enforcement with `--fail-on` (e.g. `--fail-on=HIGH` blocks promotion when drift risk exceeds threshold).
+2. Drift Metrics & Risk Engine (`pkg/analyzer`):
+- Commits ahead: unpromoted commits queued in candidate environment waiting for release.
+- Commits behind: upstream divergence / hotfixes on base environment missing from candidate.
+- Unpromoted breaking changes: conventional commits breaking syntax (`feat!:`, `BREAKING CHANGE:`) and schema migrations (`migrations/`, `*.sql`).
+- High blast radius tracking: unpromoted changes to infrastructure, containers, CI/CD pipelines, and auth modules.
+- Promotion Deployment Risk Score (0-100) and qualitative risk tiers (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
+3. Markdown Step Summary Table (`pkg/reporter`):
+- Renders dedicated `🌐 Environment Drift & Promotion Assessment` summary table in `$GITHUB_STEP_SUMMARY`.
+- Highlights base and candidate environments, ahead/behind counts with status indicators, net lines moved, breaking changes, and candidate commit queue.
+- Shows in-sync confirmation banner when environments have zero divergence.
+4. DORA & Observability Telemetry Export (`pkg/exporter`):
+- Added `DriftMetrics` struct and `NewDriftPayload` constructor.
+- Exports structured drift telemetry into DORA payloads for JSON logging or webhook dispatch.
+5. SARIF Security & Reliability Rules (`pkg/analyzer`):
+- `GHSTATS301-DRIFT-SUMMARY`: Environment drift and promotion audit summary (`note`).
+- `GHSTATS302-DRIFT-EXCESSIVE`: Excessive commit divergence detected between deployment environments (`warning`).
+- `GHSTATS303-DRIFT-UNPROMOTED-BREAKING`: Unpromoted breaking changes or database schema migrations waiting between environments (`warning`).
+- `GHSTATS304-DRIFT-UNPROMOTED-SENSITIVE`: Unpromoted critical infrastructure, CI/CD pipeline, or security configuration changes (`warning`).
+6. Demonstration Workflow & Synthetic Testing:
+- Added `.github/workflows/test-environment-drift.yml` for manual dispatch (`workflow_dispatch`) with configurable base and head environments.
+- Added end-to-end multi-tier synthetic drift test script `scripts/test-synthetic-drift.sh`.
+7. GitHub Action Integration (`action.yml`):
+- Added `drift` to target options.
+- Exposes step outputs: `drift-base-ref`, `drift-head-ref`, `drift-commits-ahead`, `drift-commits-behind`, `drift-breaking-count`, `drift-sensitive-count`, `drift-risk-level`, and `drift-risk-score`.
 
 ## Changes
-- `pkg/github/client.go`: Added `Release` struct, `ReleasePayload` struct, `GetReleaseByTag()`, `GetReleaseByID()`, `CreateRelease()`, `UpdateRelease()`, and `PublishOrUpdateReleaseNotes()`.
-- `pkg/github/client_test.go`: Added mock test suite covering all GitHub Release REST API methods and error handling.
-- `cmd/gh-stats/main.go`: Added `--publish-release-notes` and `--release-tag` flags, auto-tag detection, and release notes publishing logic.
-- `action.yml`: Declared `publish-release-notes` and `release-tag` inputs, and `release-id` and `release-url` outputs.
-- `.github/workflows/publish-release-notes.yml`: Added manual `workflow_dispatch` demonstration workflow.
-- `README.md`: Documented Automated GitHub Release Notes Publishing with CLI flags, options, and GitHub Actions workflow example.
+- `cmd/gh-stats/main.go`: Added `drift` target mode, flag handling, drift outputs, DORA drift export, and fail-on gate.
+- `pkg/gitutil/git.go`: Added `GetAheadBehind()` using `git rev-list --left-right --count`.
+- `pkg/gitutil/git_test.go`: Added `TestGetAheadBehind` unit test.
+- `pkg/analyzer/analyzer.go`: Added SARIF rules `GHSTATS301` through `GHSTATS304`.
+- `pkg/analyzer/drift.go`: Added `DriftStats`, `AnalyzeDrift()`, `CalculateRisk()`, and `PopulateSARIF()`.
+- `pkg/analyzer/drift_test.go`: Added synthetic branch drift tests and excessive divergence tests.
+- `pkg/reporter/markdown.go`: Added `GenerateDriftSummary()` and `formatDriftStatus()`.
+- `pkg/reporter/markdown_test.go`: Added `TestGenerateDriftSummary` covering drift and in-sync states.
+- `pkg/exporter/exporter.go`: Added `DriftMetrics` and `NewDriftPayload()`.
+- `pkg/exporter/exporter_test.go`: Added `TestNewDriftPayload`.
+- `scripts/test-synthetic-drift.sh`: Created end-to-end multi-tier synthetic drift test suite.
+- `.github/workflows/test-environment-drift.yml`: Created manual demonstration workflow.
+- `action.yml`: Documented `drift` target and added `drift-*` step outputs.
+- `README.md`: Documented Environment Drift & Promotion Audit with workflow examples, CLI flags, outputs, and SARIF rules.
 
 ## Verification
 - `go test -count=1 -race ./...` (All tests passed, 0 race conditions)
 - `go vet ./...` (Clean, 0 warnings)
 - `shellcheck scripts/*.sh examples/hooks/*` (Clean, 0 errors)
-- Manual CLI verification: verified `-publish-release-notes` and `-release-tag` flag availability and validation.
+- `./scripts/test-synthetic-drift.sh` (All 3 phases passed successfully)
+- CLI manual execution: verified `--target=drift` with `--base=main --head=HEAD`.

@@ -227,3 +227,52 @@ func TestNewReleasePayload(t *testing.T) {
 	}
 }
 
+func TestNewDriftPayload(t *testing.T) {
+	stats := &analyzer.DriftStats{
+		BaseRef:        "origin/production",
+		HeadRef:        "origin/staging",
+		CommitsAhead:  9,
+		CommitsBehind: 2,
+		TotalAdditions: 550,
+		TotalDeletions: 40,
+		NetChange:      510,
+		FilesChanged:   7,
+		RiskScore:      70,
+		RiskLevel:      "HIGH",
+		BreakingChanges: []analyzer.BreakingChange{
+			{CommitHash: "a1b2c3d", Subject: "feat!: breaking change", Reason: "conventional_commit"},
+		},
+		SensitiveFiles: []analyzer.SensitiveMatch{
+			{Path: "migrations/001.sql", Category: "Database Migrations"},
+			{Path: "Dockerfile", Category: "Infrastructure & Containers"},
+		},
+	}
+
+	payload := NewDriftPayload(stats, "smford/gh-stats")
+	if payload.Target != "drift" {
+		t.Errorf("expected target 'drift', got '%s'", payload.Target)
+	}
+	if payload.Drift == nil {
+		t.Fatalf("expected Drift payload, got nil")
+	}
+	if payload.Drift.BaseRef != "origin/production" || payload.Drift.HeadRef != "origin/staging" {
+		t.Errorf("expected origin/production...origin/staging, got %s...%s", payload.Drift.BaseRef, payload.Drift.HeadRef)
+	}
+	if payload.Drift.CommitsAhead != 9 {
+		t.Errorf("expected 9 commits ahead, got %d", payload.Drift.CommitsAhead)
+	}
+	if payload.Drift.CommitsBehind != 2 {
+		t.Errorf("expected 2 commits behind, got %d", payload.Drift.CommitsBehind)
+	}
+	if payload.Drift.BreakingChangesCount != 1 {
+		t.Errorf("expected 1 breaking change, got %d", payload.Drift.BreakingChangesCount)
+	}
+	if payload.Drift.SensitiveFilesCount != 2 {
+		t.Errorf("expected 2 sensitive files, got %d", payload.Drift.SensitiveFilesCount)
+	}
+	if len(payload.Drift.SensitiveCategories) != 2 {
+		t.Errorf("expected 2 sensitive categories, got %v", payload.Drift.SensitiveCategories)
+	}
+}
+
+

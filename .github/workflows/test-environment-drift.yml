@@ -1,0 +1,89 @@
+name: Test Environment Drift & Promotion Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: 'Target base branch or environment (e.g. "origin/production" or "main")'
+        required: false
+        default: 'main'
+      head_ref:
+        description: 'Candidate branch or environment to promote (e.g. "origin/staging" or "HEAD")'
+        required: false
+        default: 'HEAD'
+      fail_on:
+        description: 'Quality gate risk threshold to fail on ("CRITICAL", "HIGH", "MEDIUM", "LOW")'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  synthetic-drift-test:
+    name: Synthetic Multi-Tier Drift Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.22'
+          cache: false
+
+      - name: Run Synthetic Drift Test Suite
+        run: |
+          chmod +x ./scripts/test-synthetic-drift.sh
+          ./scripts/test-synthetic-drift.sh
+
+  live-drift-audit:
+    name: Live Environment Drift Audit
+    runs-on: ubuntu-latest
+    needs: [ synthetic-drift-test ]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gh-stats in Drift Audit Mode
+        id: drift-stats
+        uses: ./
+        with:
+          target: drift
+          base-ref: ${{ inputs.base_ref }}
+          head-ref: ${{ inputs.head_ref }}
+          fail-on: ${{ inputs.fail_on }}
+          output: drift-audit.sarif
+          export-json: drift-metrics.json
+          upload-sarif: 'true'
+          category: 'gh-stats-drift'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Drift Metrics Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-drift-metrics
+          path: drift-metrics.json
+          if-no-files-found: ignore
+
+      - name: Display Environment Drift Outputs
+        run: |
+          echo "=========================================="
+          echo "🌐 Environment Drift & Promotion Audit Demo"
+          echo "=========================================="
+          echo "Base Environment:      ${{ steps.drift-stats.outputs.drift-base-ref }}"
+          echo "Candidate Environment: ${{ steps.drift-stats.outputs.drift-head-ref }}"
+          echo "Commits Ahead:         ${{ steps.drift-stats.outputs.drift-commits-ahead }}"
+          echo "Commits Behind:        ${{ steps.drift-stats.outputs.drift-commits-behind }}"
+          echo "Breaking Changes:      ${{ steps.drift-stats.outputs.drift-breaking-count }}"
+          echo "Sensitive Files:       ${{ steps.drift-stats.outputs.drift-sensitive-count }}"
+          echo "Promotion Risk Level:  ${{ steps.drift-stats.outputs.drift-risk-level }}"
+          echo "Promotion Risk Score:  ${{ steps.drift-stats.outputs.drift-risk-score }}/100"
+          echo "=========================================="
