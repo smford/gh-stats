@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/smford/gh-stats/pkg/config"
 	"github.com/smford/gh-stats/pkg/github"
 	"github.com/smford/gh-stats/pkg/gitutil"
 	"github.com/smford/gh-stats/pkg/sarif"
@@ -199,5 +200,76 @@ func TestPRStatsWithReviewerRecommendations(t *testing.T) {
 
 	if !foundReviewersRule {
 		t.Errorf("expected %s in SARIF results", RulePRReviewers.ID)
+	}
+}
+
+func TestPRStatsWithCustomConfigThresholds(t *testing.T) {
+	cfg := &config.Config{
+		Thresholds: config.ThresholdsConfig{
+			MaxPRLines:     200,
+			StalePRDays:    5,
+			MinTestRatio:   0.3,
+			MaxDiscussions: 5,
+		},
+	}
+
+	stats := &PRStats{
+		TotalAdditions: 250,
+		TotalDeletions: 10,
+		CodeLinesAdded: 250,
+		FilesChanged:   4,
+		PrimaryFile:    "cmd/main.go",
+		Config:         cfg,
+		GitHubMeta: &github.PRMetadata{
+			Age:              7 * 24 * time.Hour, // >5 days
+			TotalDiscussions: 8,                  // >5
+		},
+	}
+
+	calculateRisk(stats)
+	builder := sarif.NewBuilder()
+	stats.PopulateSARIF(builder)
+
+	report := builder.Build()
+	foundRules := make(map[string]bool)
+	for _, res := range report.Runs[0].Results {
+		foundRules[res.RuleID] = true
+	}
+
+	if !foundRules[RulePRSize.ID] {
+		t.Errorf("expected %s to trigger with custom MaxPRLines=200", RulePRSize.ID)
+	}
+	if !foundRules[RulePRStale.ID] {
+		t.Errorf("expected %s to trigger with custom StalePRDays=5", RulePRStale.ID)
+	}
+	if !foundRules[RulePRDiscussionChurn.ID] {
+		t.Errorf("expected %s to trigger with custom MaxDiscussions=5", RulePRDiscussionChurn.ID)
+	}
+}
+
+func TestCustomSensitivePatterns(t *testing.T) {
+	cfg := &config.Config{
+		BlastRadius: config.BlastRadiusConfig{
+			CustomPatterns: []config.CustomPattern{
+				{
+					Category:    "Billing Engine",
+					Pattern:     "services/billing/**",
+					Description: "Changes to billing",
+				},
+			},
+		},
+	}
+
+	patterns := SensitivePatternsWithConfig(cfg)
+	foundBilling := false
+	for _, p := range patterns {
+		if p.Category == "Billing Engine" && p.Match("services/billing/payments/stripe.go") {
+			foundBilling = true
+			break
+		}
+	}
+
+	if !foundBilling {
+		t.Errorf("expected custom pattern to match services/billing/payments/stripe.go")
 	}
 }

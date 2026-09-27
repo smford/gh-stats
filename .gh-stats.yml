@@ -1,0 +1,32 @@
+# .gh-stats.yml - Configuration for gh-stats SRE Code Health Analysis
+# Place this file in your repository root or in .github/.gh-stats.yml
+
+# Custom threshold limits for risk scoring and alerts
+thresholds:
+  max_pr_lines: 800        # Lines of change triggering large PR alert
+  stale_pr_days: 14        # PR lifecycle age triggering stale branch drift alert
+  min_test_ratio: 0.2      # Minimum ratio of test lines to production lines
+  max_discussions: 15      # Discussion comments threshold for review friction alert
+  commit_limit: 200        # Commit window for repository churn and hotspot analysis
+
+# Custom blast radius patterns (glob syntax, supports '**' for recursive directory matches)
+blast_radius:
+  custom_patterns:
+    - category: "CI/CD Workflows"
+      pattern: ".github/workflows/**"
+      description: "GitHub Actions workflow automation and release pipelines"
+    - category: "Security & Secrets"
+      pattern: "pkg/auth/**"
+      description: "Authentication and authorization logic"
+
+# Paths or globs to ignore completely from line counting and blast radius analysis
+ignore:
+  paths:
+    - "vendor/**"
+    - "**/*.pb.go"
+    - "**/*.min.js"
+    - "**/*_gen.go"
+
+# Default quality gate threshold: fails workflow if PR risk meets or exceeds this level
+# Options: LOW, MEDIUM, HIGH, CRITICAL
+# fail_on: "CRITICAL"

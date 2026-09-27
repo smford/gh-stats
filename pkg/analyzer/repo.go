@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/smford/gh-stats/pkg/config"
 	"github.com/smford/gh-stats/pkg/github"
 	"github.com/smford/gh-stats/pkg/gitutil"
 	"github.com/smford/gh-stats/pkg/sarif"
@@ -43,22 +44,38 @@ type RepoStats struct {
 	PrimaryFile         string
 	GitHubMeta          *github.RepoMetadata         // Optional GitHub API metadata
 	CommitActivity      []github.CommitActivityWeek  // Optional 52-week activity
+	Config              *config.Config               // Active repository configuration
 }
 
 // AnalyzeRepo analyzes the entire git repository.
-func AnalyzeRepo(runner *gitutil.Runner, commitLimit int) (*RepoStats, error) {
-	if commitLimit <= 0 {
-		commitLimit = 200
+func AnalyzeRepo(runner *gitutil.Runner, commitLimit int, cfg *config.Config) (*RepoStats, error) {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
 	}
 
-	trackedFiles, err := runner.ListTrackedFiles()
+	if commitLimit <= 0 {
+		commitLimit = cfg.Thresholds.CommitLimit
+		if commitLimit <= 0 {
+			commitLimit = 200
+		}
+	}
+
+	allTrackedFiles, err := runner.ListTrackedFiles()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tracked files: %w", err)
+	}
+
+	var trackedFiles []string
+	for _, f := range allTrackedFiles {
+		if !cfg.IsIgnored(f) {
+			trackedFiles = append(trackedFiles, f)
+		}
 	}
 
 	stats := &RepoStats{
 		TotalFiles:  len(trackedFiles),
 		PrimaryFile: "README.md",
+		Config:      cfg,
 	}
 
 	extMap := make(map[string]int)
@@ -93,7 +110,7 @@ func AnalyzeRepo(runner *gitutil.Runner, commitLimit int) (*RepoStats, error) {
 	// Hotspots
 	churnCounts, _ := runner.GetFileChurnFrequency(commitLimit)
 	for path, count := range churnCounts {
-		if path != "" {
+		if path != "" && !cfg.IsIgnored(path) {
 			stats.ChurnHotspots = append(stats.ChurnHotspots, ChurnEntry{
 				Path:  path,
 				Count: count,

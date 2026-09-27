@@ -147,6 +147,7 @@ jobs:
 | `category` | SARIF category label in GitHub Code Scanning | `gh-stats` | No |
 | `comment-pr` | Post or update a live sticky Markdown summary comment on the PR conversation thread | `'false'` | No |
 | `fail-on` | Enforce risk budget gating: fail job if risk meets/exceeds threshold (`'CRITICAL'`, `'HIGH'`, `'MEDIUM'`, `'LOW'`) | `''` (disabled) | No |
+| `config-path` | Path to `.gh-stats.yml` configuration file (auto-discovers `.gh-stats.yml` or `.github/.gh-stats.yml` if omitted) | `''` | No |
 | `token` | GitHub token for authentication (API stats, sticky comment, SARIF upload) | `${{ github.token }}` | No |
 
 ### Outputs
@@ -176,6 +177,46 @@ jobs:
 
 ---
 
+## ⚙️ Configuration as Code (`.gh-stats.yml`)
+
+Repositories can customize risk thresholds, define custom blast radius patterns, and ignore paths using a `.gh-stats.yml` or `.gh-stats.yaml` file located in the repository root or `.github/` folder:
+
+```yaml
+# .gh-stats.yml
+
+# Custom threshold limits for risk scoring and alerts
+thresholds:
+  max_pr_lines: 800        # Lines of change triggering large PR alert (default: 800)
+  stale_pr_days: 14        # PR age in days triggering stale branch drift alert (default: 14)
+  min_test_ratio: 0.2      # Minimum ratio of test lines to production code (default: 0.2)
+  max_discussions: 15      # Discussion comments threshold for review friction alert (default: 15)
+  commit_limit: 200        # Commit window for repository churn and hotspot analysis (default: 200)
+
+# Custom blast radius patterns (glob syntax with '**' recursive support)
+blast_radius:
+  custom_patterns:
+    - category: "Billing Engine"
+      pattern: "services/billing/**"
+      description: "Modifications to revenue, invoicing, or payment processing pipelines"
+    - category: "Database Models"
+      pattern: "models/**"
+      description: "Core database schema and ORM entity definitions"
+
+# Paths or globs to ignore completely from diff line counts and blast radius checks
+ignore:
+  paths:
+    - "vendor/**"
+    - "**/*.pb.go"
+    - "**/*_gen.go"
+    - "frontend/dist/**"
+
+# Default quality gate threshold: fails workflow if PR risk meets or exceeds this level
+# Options: LOW, MEDIUM, HIGH, CRITICAL
+fail_on: "HIGH"
+```
+
+---
+
 ## 💻 Local CLI Usage
 
 You can build and run `gh-stats` locally on any git repository:
@@ -189,6 +230,9 @@ go build -o gh-stats ./cmd/gh-stats
 
 # Analyze a feature branch PR against main
 ./gh-stats -target=pr -base=main -head=HEAD -output=pr.sarif
+
+# Use a custom configuration file
+./gh-stats -target=pr -config=.github/.gh-stats.yml
 ```
 
 ### CLI Flags:
@@ -199,12 +243,18 @@ go build -o gh-stats ./cmd/gh-stats
         Base ref for PR comparison (e.g. origin/main)
   -head string
         Head ref for PR comparison (default "HEAD")
+  -config string
+        Path to .gh-stats.yml configuration file
   -output string
         Path to output SARIF file (default "gh-stats.sarif")
   -repo-path string
         Path to git repository (default ".")
   -commit-limit int
         Maximum commit history to examine for repo hotspots (default 200)
+  -fail-on string
+        Fail workflow if PR risk meets/exceeds threshold (e.g. 'HIGH', 'CRITICAL')
+  -comment-pr
+        Post or update a sticky summary comment on the PR
   -quiet
         Suppress stdout output
 ```

@@ -42,6 +42,10 @@ inputs:
     description: 'Fail the workflow if PR SRE risk level meets or exceeds threshold ("CRITICAL", "HIGH", "MEDIUM", "LOW")'
     required: false
     default: ''
+  config-path:
+    description: 'Path to .gh-stats.yml configuration file (defaults to auto-discovering .gh-stats.yml or .github/.gh-stats.yml)'
+    required: false
+    default: ''
   token:
     description: 'GitHub token for API access or SARIF upload'
     required: false
@@ -75,6 +79,7 @@ runs:
         INPUT_COMMIT_LIMIT: ${{ inputs.commit-limit }}
         INPUT_COMMENT_PR: ${{ inputs.comment-pr }}
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_CONFIG_PATH: ${{ inputs.config-path }}
         INPUT_TOKEN: ${{ inputs.token }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |
