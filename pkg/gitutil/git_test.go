@@ -35,4 +35,13 @@ func TestGitRunner(t *testing.T) {
 	if len(authorStats) == 0 {
 		t.Errorf("expected at least one author in commit history")
 	}
+
+	// Test GetFileAuthors on README.md
+	fileAuthors, err := runner.GetFileAuthors("README.md", 10)
+	if err != nil {
+		t.Fatalf("failed to get file authors for README.md: %v", err)
+	}
+	if len(fileAuthors) == 0 {
+		t.Errorf("expected at least one author for README.md")
+	}
 }

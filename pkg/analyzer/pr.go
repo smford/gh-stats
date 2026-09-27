@@ -33,10 +33,18 @@ type PRStats struct {
 	TopChangedFiles     []gitutil.FileDiffStat
 	CommitCount         int
 	Commits             []gitutil.CommitInfo
-	GitHubMeta          *github.PRMetadata // Optional enrichment from GitHub API
-	RiskScore           int                // 0-100 (higher = riskier)
-	RiskLevel           string             // "LOW", "MEDIUM", "HIGH", "CRITICAL"
-	PrimaryFile         string             // representative file for PR-wide SARIF results
+	GitHubMeta          *github.PRMetadata       // Optional enrichment from GitHub API
+	RecommendedReviewers []ReviewerRecommendation // Suggested domain expert reviewers
+	RiskScore           int                      // 0-100 (higher = riskier)
+	RiskLevel           string                   // "LOW", "MEDIUM", "HIGH", "CRITICAL"
+	PrimaryFile         string                   // representative file for PR-wide SARIF results
+}
+
+// ReviewerRecommendation represents a suggested code reviewer with domain expertise.
+type ReviewerRecommendation struct {
+	Author      string   `json:"author"`
+	CommitCount int      `json:"commitCount"`
+	TopFiles    []string `json:"topFiles"`
 }
 
 // SensitiveMatch notes a sensitive file and its classification.
@@ -121,8 +129,75 @@ func AnalyzePR(runner *gitutil.Runner, baseRef, headRef string) (*PRStats, error
 		stats.PrimaryFile = "README.md"
 	}
 
+	stats.RecommendedReviewers = findRecommendedReviewers(runner, stats)
 	calculateRisk(stats)
 	return stats, nil
+}
+
+// findRecommendedReviewers identifies historical contributors to the modified files.
+func findRecommendedReviewers(runner *gitutil.Runner, stats *PRStats) []ReviewerRecommendation {
+	if runner == nil || len(stats.TopChangedFiles) == 0 {
+		return nil
+	}
+
+	// PR author to exclude from self-recommendation
+	prAuthor := ""
+	if len(stats.Commits) > 0 {
+		prAuthor = strings.ToLower(strings.TrimSpace(stats.Commits[0].Author))
+	}
+
+	authorScores := make(map[string]int)
+	authorFiles := make(map[string]map[string]bool)
+
+	// Inspect top changed files (up to 7)
+	limit := min(7, len(stats.TopChangedFiles))
+	for i := 0; i < limit; i++ {
+		file := stats.TopChangedFiles[i].Path
+		if IsGeneratedFile(file) || IsDocumentationFile(file) {
+			continue
+		}
+
+		authors, err := runner.GetFileAuthors(file, 25)
+		if err != nil {
+			continue
+		}
+
+		for author, count := range authors {
+			cleanAuthor := strings.TrimSpace(author)
+			if cleanAuthor == "" || strings.ToLower(cleanAuthor) == prAuthor {
+				continue
+			}
+			authorScores[cleanAuthor] += count
+			if authorFiles[cleanAuthor] == nil {
+				authorFiles[cleanAuthor] = make(map[string]bool)
+			}
+			authorFiles[cleanAuthor][file] = true
+		}
+	}
+
+	var recommendations []ReviewerRecommendation
+	for author, totalCommits := range authorScores {
+		var files []string
+		for f := range authorFiles[author] {
+			files = append(files, f)
+		}
+		sort.Strings(files)
+		recommendations = append(recommendations, ReviewerRecommendation{
+			Author:      author,
+			CommitCount: totalCommits,
+			TopFiles:    files,
+		})
+	}
+
+	sort.Slice(recommendations, func(i, j int) bool {
+		return recommendations[i].CommitCount > recommendations[j].CommitCount
+	})
+
+	if len(recommendations) > 3 {
+		recommendations = recommendations[:3]
+	}
+
+	return recommendations
 }
 
 // calculateRisk computes an SRE risk score (0-100) based on size, test coverage, and blast radius.
@@ -201,6 +276,7 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 	builder.AddRule(RulePRBlastRadius)
 	builder.AddRule(RulePRStale)
 	builder.AddRule(RulePRDiscussionChurn)
+	builder.AddRule(RulePRReviewers)
 
 	totalLines := stats.TotalAdditions + stats.TotalDeletions
 
@@ -216,6 +292,13 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 	sb.WriteString(fmt.Sprintf("- **Volume:** +%d / -%d lines across **%d** files\n", stats.TotalAdditions, stats.TotalDeletions, stats.FilesChanged))
 	sb.WriteString(fmt.Sprintf("- **Test Ratio:** %d test lines added vs %d production lines added\n", stats.TestLinesAdded, stats.CodeLinesAdded))
 	sb.WriteString(fmt.Sprintf("- **Commits:** %d commit(s)\n", stats.CommitCount))
+
+	if len(stats.RecommendedReviewers) > 0 {
+		sb.WriteString("\n**Recommended Reviewers (Domain Experts):**\n")
+		for _, r := range stats.RecommendedReviewers {
+			sb.WriteString(fmt.Sprintf("- **%s** (%d historical commits)\n", r.Author, r.CommitCount))
+		}
+	}
 
 	if stats.GitHubMeta != nil {
 		sb.WriteString(fmt.Sprintf("- **PR Lifecycle Age:** `%s` (Created: %s)\n", formatDuration(stats.GitHubMeta.Age), stats.GitHubMeta.CreatedAt.Format("2006-01-02 15:04 MST")))
@@ -334,6 +417,28 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 			stats.PrimaryFile,
 			1,
 			map[string]any{"totalDiscussions": stats.GitHubMeta.TotalDiscussions, "reviews": stats.GitHubMeta.ReviewsCount},
+		)
+	}
+
+	// 7. Recommended Domain Expert Reviewers
+	if len(stats.RecommendedReviewers) > 0 {
+		var revSB strings.Builder
+		revSB.WriteString("### 👥 Recommended Domain Expert Reviewers\n")
+		revSB.WriteString("Based on historical git commit patterns, the following engineers have deep context on the modified components:\n\n")
+		for _, r := range stats.RecommendedReviewers {
+			revSB.WriteString(fmt.Sprintf("- **%s**: **%d commits** across `%s`\n", r.Author, r.CommitCount, strings.Join(r.TopFiles, "`, `")))
+		}
+		revSB.WriteString("\n*Routing PR reviews to domain experts reduces defect escape rates and accelerates turnaround times.*")
+
+		topAuthor := stats.RecommendedReviewers[0].Author
+		builder.AddResult(
+			RulePRReviewers.ID,
+			"note",
+			fmt.Sprintf("Recommended reviewer: %s has highest historical context on modified files (%d commits)", topAuthor, stats.RecommendedReviewers[0].CommitCount),
+			revSB.String(),
+			stats.PrimaryFile,
+			1,
+			map[string]any{"recommendedReviewers": stats.RecommendedReviewers},
 		)
 	}
 }

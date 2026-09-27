@@ -81,6 +81,16 @@ func GeneratePRSummary(stats *analyzer.PRStats) string {
 		sb.WriteString(fmt.Sprintf("| **Author Trust Tier** | `%s` |\n", stats.GitHubMeta.AuthorAssociation))
 	}
 
+	if len(stats.RecommendedReviewers) > 0 {
+		sb.WriteString("\n## 👥 Suggested Reviewers (Domain Experts)\n\n")
+		sb.WriteString("| Reviewer | Historical Commits | Expertise Area |\n")
+		sb.WriteString("| :--- | :---: | :--- |\n")
+		for _, r := range stats.RecommendedReviewers {
+			filesStr := strings.Join(r.TopFiles, "`, `")
+			sb.WriteString(fmt.Sprintf("| **%s** | `%d` | `%s` |\n", r.Author, r.CommitCount, filesStr))
+		}
+	}
+
 	return sb.String()
 }
 
