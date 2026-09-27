@@ -1,5 +1,7 @@
 # Binaries
 /gh-stats
+/dist/
+dist/
 *.exe
 *.exe~
 *.dll

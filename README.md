@@ -244,6 +244,18 @@ go build -o gh-stats ./cmd/gh-stats
 ./gh-stats -target=pr -config=.github/.gh-stats.yml
 ```
 
+### 🍺 Homebrew Installation (macOS & Linux)
+
+Install `gh-stats` via Homebrew from the official tap:
+
+```bash
+brew tap smford/homebrew-tap
+brew install gh-stats
+
+# Verify installation
+gh-stats -version
+```
+
 ### CLI Flags:
 ```text
   -target string
@@ -264,6 +276,8 @@ go build -o gh-stats ./cmd/gh-stats
         Fail workflow if PR risk meets/exceeds threshold (e.g. 'HIGH', 'CRITICAL')
   -comment-pr
         Post or update a sticky summary comment on the PR
+  -version
+        Print gh-stats version and exit
   -quiet
         Suppress stdout output
 ```
