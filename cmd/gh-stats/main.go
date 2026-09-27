@@ -11,6 +11,7 @@ import (
 
 	"github.com/smford/gh-stats/pkg/analyzer"
 	"github.com/smford/gh-stats/pkg/config"
+	"github.com/smford/gh-stats/pkg/exporter"
 	"github.com/smford/gh-stats/pkg/github"
 	"github.com/smford/gh-stats/pkg/gitutil"
 	"github.com/smford/gh-stats/pkg/reporter"
@@ -21,20 +22,23 @@ var version = "dev"
 
 func main() {
 	var (
-		flagTarget      string
-		flagBaseRef     string
-		flagHeadRef     string
-		flagOutput      string
-		flagRepoPath    string
-		flagCommitLimit int
-		flagConfigPath  string
-		flagToken       string
-		flagPRNumber    int
-		flagRepoSlug    string
-		flagFailOn      string
-		flagCommentPR   bool
-		flagQuiet       bool
-		flagVersion     bool
+		flagTarget        string
+		flagBaseRef       string
+		flagHeadRef       string
+		flagOutput        string
+		flagRepoPath      string
+		flagCommitLimit   int
+		flagConfigPath    string
+		flagToken         string
+		flagPRNumber      int
+		flagRepoSlug      string
+		flagFailOn        string
+		flagCommentPR     bool
+		flagQuiet         bool
+		flagVersion       bool
+		flagExportJSON    string
+		flagExportWebhook string
+		flagWebhookSecret string
 	)
 
 	flag.StringVar(&flagTarget, "target", getEnvDefault("INPUT_TARGET", getEnvDefault("INPUT_MODE", "auto")), "Target scope: 'pr', 'repo', or 'auto'")
@@ -49,6 +53,9 @@ func main() {
 	flag.StringVar(&flagRepoSlug, "repo", getEnvDefault("GITHUB_REPOSITORY", ""), "GitHub repository slug owner/repo (auto-detected if omitted)")
 	flag.StringVar(&flagFailOn, "fail-on", getEnvDefault("INPUT_FAIL_ON", ""), "Fail workflow if PR risk meets/exceeds threshold (e.g. 'HIGH', 'CRITICAL')")
 	flag.BoolVar(&flagCommentPR, "comment-pr", getEnvDefault("INPUT_COMMENT_PR", "false") == "true", "Post or update a sticky summary comment on the PR")
+	flag.StringVar(&flagExportJSON, "export-json", getEnvDefault("INPUT_EXPORT_JSON", ""), "Path to export DORA & SRE metrics JSON file")
+	flag.StringVar(&flagExportWebhook, "export-webhook", getEnvDefault("INPUT_EXPORT_WEBHOOK", ""), "Webhook URL to export DORA & SRE metrics")
+	flag.StringVar(&flagWebhookSecret, "webhook-secret", getEnvDefault("INPUT_WEBHOOK_SECRET", os.Getenv("WEBHOOK_SECRET")), "Secret key or bearer token for webhook export")
 	flag.BoolVar(&flagQuiet, "quiet", false, "Suppress stdout output")
 	flag.BoolVar(&flagVersion, "version", false, "Print gh-stats version and exit")
 	flag.Parse()
@@ -84,6 +91,15 @@ func main() {
 	if flagFailOn == "" && cfg.FailOn != "" {
 		flagFailOn = cfg.FailOn
 	}
+	if flagExportJSON == "" && cfg.Export.JSONPath != "" {
+		flagExportJSON = cfg.Export.JSONPath
+	}
+	if flagExportWebhook == "" && cfg.Export.WebhookURL != "" {
+		flagExportWebhook = cfg.Export.WebhookURL
+	}
+	if flagWebhookSecret == "" && cfg.Export.WebhookSecret != "" {
+		flagWebhookSecret = cfg.Export.WebhookSecret
+	}
 
 	// Auto-detect repo slug from git remote if not provided
 	repoSlug := flagRepoSlug
@@ -102,6 +118,7 @@ func main() {
 
 	var markdownSummary string
 	var prStats *analyzer.PRStats
+	var repoStats *analyzer.RepoStats
 
 	switch target {
 	case "pr":
@@ -188,6 +205,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "❌ Error analyzing repository: %v\n", err)
 			os.Exit(1)
 		}
+		repoStats = stats
 
 		// Optional GitHub API enrichment for repo
 		if ghClient != nil && repoSlug != "" {
@@ -249,6 +267,41 @@ func main() {
 
 	if !flagQuiet && os.Getenv("GITHUB_ACTIONS") == "" {
 		fmt.Println("\n" + markdownSummary)
+	}
+
+	// DORA & SRE Observability Export (JSON and/or Webhook)
+	var metricsPayload *exporter.DORAMetricsPayload
+	if prStats != nil {
+		metricsPayload = exporter.NewPRPayload(prStats, repoSlug)
+	} else if repoStats != nil {
+		metricsPayload = exporter.NewRepoPayload(repoStats, repoSlug)
+	}
+
+	if metricsPayload != nil {
+		if flagExportJSON != "" {
+			if err := exporter.ExportJSON(metricsPayload, flagExportJSON); err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️ Failed to export metrics JSON: %v\n", err)
+			} else {
+				if !flagQuiet {
+					fmt.Printf("📊 DORA metrics exported to: %s\n", flagExportJSON)
+				}
+				setGithubOutput("metrics-json", flagExportJSON)
+			}
+		}
+
+		if flagExportWebhook != "" {
+			if !flagQuiet {
+				fmt.Printf("🌐 Dispatching DORA metrics to webhook: %s...\n", flagExportWebhook)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := exporter.ExportWebhook(ctx, metricsPayload, flagExportWebhook, flagWebhookSecret)
+			cancel()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️ Failed to dispatch metrics webhook: %v\n", err)
+			} else if !flagQuiet {
+				fmt.Println("✅ Metrics webhook dispatched successfully")
+			}
+		}
 	}
 
 	// Quality gate enforcement (fail-on)

@@ -157,6 +157,9 @@ Merges to `main` automatically trigger automated SemVer release generation:
 | `comment-pr` | Post or update a live sticky Markdown summary comment on the PR conversation thread | `'false'` | No |
 | `fail-on` | Enforce risk budget gating: fail job if risk meets/exceeds threshold (`'CRITICAL'`, `'HIGH'`, `'MEDIUM'`, `'LOW'`) | `''` (disabled) | No |
 | `config-path` | Path to `.gh-stats.yml` configuration file (auto-discovers `.gh-stats.yml` or `.github/.gh-stats.yml` if omitted) | `''` | No |
+| `export-json` | File path to export structured DORA & SRE metrics in JSON format | `''` (disabled) | No |
+| `export-webhook` | HTTP/HTTPS Webhook endpoint to dispatch DORA & SRE metrics payload | `''` (disabled) | No |
+| `webhook-secret` | HMAC-SHA256 signature secret or Bearer token for webhook authentication | `''` | No |
 | `token` | GitHub token for authentication (API stats, sticky comment, SARIF upload) | `${{ github.token }}` | No |
 
 ### Outputs
@@ -164,6 +167,7 @@ Merges to `main` automatically trigger automated SemVer release generation:
 | Output | Description |
 | :--- | :--- |
 | `sarif-file` | Path to the generated SARIF report file |
+| `metrics-json` | Path to the exported metrics JSON file (if `export-json` was enabled) |
 | `target` | Resolved analysis target (`pr` or `repo`) |
 
 ---
@@ -222,6 +226,30 @@ ignore:
 # Default quality gate threshold: fails workflow if PR risk meets or exceeds this level
 # Options: LOW, MEDIUM, HIGH, CRITICAL
 fail_on: "HIGH"
+
+# DORA & SRE Observability Telemetry Exporter
+export:
+  json_path: "metrics.json"
+  webhook_url: "https://metrics.internal/v1/dora"
+  webhook_secret: "secret-token"
+```
+
+---
+
+## 📊 DORA & SRE Observability Exporter
+
+Track reliability velocity and correlate risk with downstream deployments:
+- **Lead Time for Changes:** PR lifecycle duration from creation to review and merge.
+- **Change Failure Rate Correlation:** Quantify risk scores against production rollback/incident frequencies.
+- **Test Debt Velocity:** Track test-to-code ratio trends over time across squads.
+- **Webhook Dispatch:** Directly push structured JSON telemetry to Datadog, OpenTelemetry collectors, Grafana, or internal metrics pipelines with optional HMAC-SHA256 verification (`X-Hub-Signature-256`) and Bearer authentication.
+
+```bash
+# Export metrics to a JSON file
+gh-stats -target=pr -export-json=metrics.json
+
+# Stream metrics to an observability webhook
+gh-stats -target=pr -export-webhook=https://metrics.internal/v1/dora -webhook-secret="secret-token"
 ```
 
 ---
@@ -276,6 +304,12 @@ gh-stats -version
         Fail workflow if PR risk meets/exceeds threshold (e.g. 'HIGH', 'CRITICAL')
   -comment-pr
         Post or update a sticky summary comment on the PR
+  -export-json string
+        Path to export DORA & SRE metrics JSON file
+  -export-webhook string
+        Webhook URL to export DORA & SRE metrics
+  -webhook-secret string
+        Secret key or bearer token for webhook export
   -version
         Print gh-stats version and exit
   -quiet
