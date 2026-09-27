@@ -14,6 +14,7 @@ import (
 	"github.com/smford/gh-stats/pkg/exporter"
 	"github.com/smford/gh-stats/pkg/github"
 	"github.com/smford/gh-stats/pkg/gitutil"
+	"github.com/smford/gh-stats/pkg/hook"
 	"github.com/smford/gh-stats/pkg/reporter"
 	"github.com/smford/gh-stats/pkg/sarif"
 )
@@ -21,6 +22,11 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "hook" {
+		handleHookCommand(os.Args[2:])
+		return
+	}
+
 	var (
 		flagTarget        string
 		flagBaseRef       string
@@ -127,7 +133,7 @@ func main() {
 			baseRef = runner.GetDefaultBaseRef()
 		}
 		// In GitHub Actions pull_request, baseRef is often just "main"; prefix origin/ if needed
-		if !strings.HasPrefix(baseRef, "origin/") && baseRef != "HEAD~1" {
+		if !strings.HasPrefix(baseRef, "origin/") && baseRef != "HEAD~1" && baseRef != "HEAD" && baseRef != "staged" && baseRef != "--cached" {
 			if _, err := runner.Exec("rev-parse", "--verify", "origin/"+baseRef); err == nil {
 				baseRef = "origin/" + baseRef
 			}
@@ -306,9 +312,7 @@ func main() {
 
 	// Quality gate enforcement (fail-on)
 	if target == "pr" && prStats != nil && flagFailOn != "" {
-		prPriority := riskLevelPriority(prStats.RiskLevel)
-		gatePriority := riskLevelPriority(flagFailOn)
-		if gatePriority > 0 && prPriority >= gatePriority {
+		if analyzer.IsRiskThresholdMet(prStats.RiskLevel, flagFailOn) {
 			fmt.Fprintf(os.Stderr, "❌ Quality Gate Failed: PR SRE risk level [%s] meets or exceeds fail-on threshold [%s]\n",
 				prStats.RiskLevel, strings.ToUpper(flagFailOn))
 			os.Exit(2)
@@ -316,18 +320,109 @@ func main() {
 	}
 }
 
-func riskLevelPriority(level string) int {
-	switch strings.ToUpper(strings.TrimSpace(level)) {
-	case "CRITICAL":
-		return 4
-	case "HIGH":
-		return 3
-	case "MEDIUM":
-		return 2
-	case "LOW":
-		return 1
+func handleHookCommand(args []string) {
+	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		fmt.Println("Usage: gh-stats hook <install|uninstall|run> [options]")
+		fmt.Println()
+		fmt.Println("Shift-Left Git Hook management and execution.")
+		fmt.Println()
+		fmt.Println("Commands:")
+		fmt.Println("  install     Install shift-left git hook into .git/hooks")
+		fmt.Println("  uninstall   Remove installed git hook from .git/hooks")
+		fmt.Println("  run         Execute risk evaluation for a git hook")
+		fmt.Println()
+		fmt.Println("Examples:")
+		fmt.Println("  gh-stats hook install")
+		fmt.Println("  gh-stats hook install --fail-on=HIGH")
+		fmt.Println("  gh-stats hook install --type=pre-commit --fail-on=CRITICAL")
+		fmt.Println("  gh-stats hook uninstall")
+		fmt.Println("  gh-stats hook run --type=pre-push")
+		return
+	}
+
+	subcmd := args[0]
+	subargs := args[1:]
+
+	switch subcmd {
+	case "install":
+		installCmd := flag.NewFlagSet("install", flag.ExitOnError)
+		hookType := installCmd.String("type", hook.HookPrePush, "Hook type to install: 'pre-push' or 'pre-commit'")
+		failOn := installCmd.String("fail-on", "", "Risk threshold to fail on (e.g. 'HIGH', 'CRITICAL')")
+		repoPath := installCmd.String("repo-path", ".", "Path to git repository")
+		force := installCmd.Bool("force", false, "Force overwrite of existing non-gh-stats hook")
+		quiet := installCmd.Bool("quiet", false, "Suppress output")
+		_ = installCmd.Parse(subargs)
+
+		hookPath, err := hook.Install(hook.Options{
+			RepoPath: *repoPath,
+			HookType: *hookType,
+			FailOn:   *failOn,
+			Force:    *force,
+			Quiet:    *quiet,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Failed to install %s hook: %v\n", *hookType, err)
+			os.Exit(1)
+		}
+
+		if !*quiet {
+			fmt.Printf("✅ Installed shift-left %s hook at %s\n", *hookType, hookPath)
+			if *hookType == hook.HookPrePush {
+				fmt.Println("💡 The pre-push hook will evaluate risk before 'git push' to block risky deployments.")
+				fmt.Println("   Bypass temporarily if needed using: git push --no-verify")
+			} else {
+				fmt.Println("💡 The pre-commit hook will evaluate staged risk before 'git commit'.")
+				fmt.Println("   Bypass temporarily if needed using: git commit --no-verify")
+			}
+		}
+
+	case "uninstall":
+		uninstallCmd := flag.NewFlagSet("uninstall", flag.ExitOnError)
+		hookType := uninstallCmd.String("type", hook.HookPrePush, "Hook type to uninstall: 'pre-push' or 'pre-commit'")
+		repoPath := uninstallCmd.String("repo-path", ".", "Path to git repository")
+		force := uninstallCmd.Bool("force", false, "Force remove even if hook was modified")
+		quiet := uninstallCmd.Bool("quiet", false, "Suppress output")
+		_ = uninstallCmd.Parse(subargs)
+
+		err := hook.Uninstall(hook.Options{
+			RepoPath: *repoPath,
+			HookType: *hookType,
+			Force:    *force,
+			Quiet:    *quiet,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Failed to uninstall %s hook: %v\n", *hookType, err)
+			os.Exit(1)
+		}
+
+		if !*quiet {
+			fmt.Printf("✅ Uninstalled %s hook from .git/hooks/%s\n", *hookType, *hookType)
+		}
+
+	case "run":
+		runCmd := flag.NewFlagSet("run", flag.ExitOnError)
+		hookType := runCmd.String("type", hook.HookPrePush, "Hook type to run: 'pre-push' or 'pre-commit'")
+		baseRef := runCmd.String("base", "", "Base reference branch (auto-detected if omitted)")
+		failOn := runCmd.String("fail-on", "", "Risk threshold to fail on (e.g. 'HIGH', 'CRITICAL')")
+		repoPath := runCmd.String("repo-path", ".", "Path to git repository")
+		quiet := runCmd.Bool("quiet", false, "Suppress output")
+		_ = runCmd.Parse(subargs)
+
+		err := hook.Run(hook.RunOptions{
+			RepoPath: *repoPath,
+			HookType: *hookType,
+			BaseRef:  *baseRef,
+			FailOn:   *failOn,
+			Quiet:    *quiet,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			os.Exit(1)
+		}
+
 	default:
-		return 0
+		fmt.Fprintf(os.Stderr, "❌ Unknown hook command: %s. Use 'install', 'uninstall', or 'run'.\n", subcmd)
+		os.Exit(1)
 	}
 }
 
