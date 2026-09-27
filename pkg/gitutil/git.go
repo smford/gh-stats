@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -87,23 +88,47 @@ func (r *Runner) GetDefaultBaseRef() string {
 	return "HEAD~1"
 }
 
+// GetHooksDir returns the absolute path to the git hooks directory for this repository.
+func (r *Runner) GetHooksDir() (string, error) {
+	out, err := r.Exec("rev-parse", "--git-path", "hooks")
+	if err != nil {
+		return filepath.Join(r.RepoDir, ".git", "hooks"), nil
+	}
+	path := strings.TrimSpace(out)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(r.RepoDir, path)
+	}
+	return filepath.Clean(path), nil
+}
+
 // GetDiffStats retrieves file addition and deletion stats between two references.
 func (r *Runner) GetDiffStats(baseRef, headRef string) ([]FileDiffStat, error) {
-	// Try three-dot diff first (merge-base), fallback to two-dot
-	diffRange := fmt.Sprintf("%s...%s", baseRef, headRef)
-	out, err := r.Exec("diff", "--numstat", diffRange)
-	if err != nil {
-		// Fallback to two-dot diff
-		diffRange = fmt.Sprintf("%s..%s", baseRef, headRef)
-		out, err = r.Exec("diff", "--numstat", diffRange)
+	var out, nameStatusOut string
+	var err error
+
+	if baseRef == "staged" || baseRef == "--cached" {
+		out, err = r.Exec("diff", "--numstat", "--cached")
 		if err != nil {
 			return nil, err
 		}
+		nameStatusOut, _ = r.Exec("diff", "--name-status", "--cached")
+	} else {
+		// Try three-dot diff first (merge-base), fallback to two-dot
+		diffRange := fmt.Sprintf("%s...%s", baseRef, headRef)
+		out, err = r.Exec("diff", "--numstat", diffRange)
+		if err != nil {
+			// Fallback to two-dot diff
+			diffRange = fmt.Sprintf("%s..%s", baseRef, headRef)
+			out, err = r.Exec("diff", "--numstat", diffRange)
+			if err != nil {
+				return nil, err
+			}
+		}
+		nameStatusOut, _ = r.Exec("diff", "--name-status", diffRange)
 	}
 
 	statusMap := make(map[string]string)
-	nameStatusOut, err := r.Exec("diff", "--name-status", diffRange)
-	if err == nil {
+	if nameStatusOut != "" {
 		lines := strings.Split(nameStatusOut, "\n")
 		for _, line := range lines {
 			parts := strings.Fields(line)
@@ -149,6 +174,10 @@ func (r *Runner) GetDiffStats(baseRef, headRef string) ([]FileDiffStat, error) {
 
 // GetCommits returns commits between baseRef and headRef.
 func (r *Runner) GetCommits(baseRef, headRef string) ([]CommitInfo, error) {
+	if baseRef == "staged" || baseRef == "--cached" {
+		return nil, nil
+	}
+
 	diffRange := fmt.Sprintf("%s...%s", baseRef, headRef)
 	out, err := r.Exec("log", "--format=%h|%an|%s", diffRange)
 	if err != nil {

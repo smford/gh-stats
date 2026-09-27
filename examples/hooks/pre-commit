@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# gh-stats Shift-Left Pre-Commit Git Hook Example
+#
+# Evaluates staged changes prior to committing to catch high-risk
+# modifications early (e.g., unintended sensitive file commits).
+#
+# Installation:
+#   1. Using the gh-stats CLI (recommended):
+#      gh-stats hook install --type=pre-commit
+#
+#   2. Manual:
+#      cp examples/hooks/pre-commit .git/hooks/pre-commit
+#      chmod +x .git/hooks/pre-commit
+
+set -euo pipefail
+
+# Allow bypassing via environment variable or standard git flags (--no-verify)
+if [ "${SKIP_GH_STATS:-0}" = "1" ]; then
+    echo "⚡ gh-stats pre-commit hook skipped (SKIP_GH_STATS=1)"
+    exit 0
+fi
+
+# Skip if there are no staged changes
+if git diff --cached --quiet; then
+    exit 0
+fi
+
+# Locate gh-stats executable
+if command -v gh-stats >/dev/null 2>&1; then
+    CMD=(gh-stats)
+elif command -v go >/dev/null 2>&1 && [ -f "cmd/gh-stats/main.go" ]; then
+    CMD=(go run ./cmd/gh-stats)
+else
+    echo "⚠️  gh-stats not found in PATH. Skipping pre-commit risk evaluation."
+    echo "   To install: brew install smford/tap/gh-stats OR go install github.com/smford/gh-stats/cmd/gh-stats@latest"
+    exit 0
+fi
+
+# Execute pre-commit staged risk assessment
+exec "${CMD[@]}" hook run --type=pre-commit

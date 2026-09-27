@@ -511,3 +511,27 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// RiskLevelPriority returns the numeric severity priority for a risk level string.
+func RiskLevelPriority(level string) int {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "CRITICAL":
+		return 4
+	case "HIGH":
+		return 3
+	case "MEDIUM":
+		return 2
+	case "LOW":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// IsRiskThresholdMet checks if currentLevel meets or exceeds thresholdLevel.
+func IsRiskThresholdMet(currentLevel, thresholdLevel string) bool {
+	curr := RiskLevelPriority(currentLevel)
+	thresh := RiskLevelPriority(thresholdLevel)
+	return thresh > 0 && curr >= thresh
+}
+

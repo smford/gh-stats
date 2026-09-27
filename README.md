@@ -309,6 +309,63 @@ gh-stats -version
 
 ---
 
+## 🪝 Shift-Left Local Git Hooks (Pre-Push & Pre-Commit)
+
+Shift reliability and quality gates directly to engineer workstations **before** pushing to remote CI/CD or opening a pull request.
+
+`gh-stats` provides a built-in hook manager that installs lightweight, portable git hooks into your `.git/hooks` directory:
+
+```bash
+# Install shift-left pre-push hook (default)
+gh-stats hook install
+
+# Specify custom risk threshold for blocking pushes
+gh-stats hook install --fail-on=HIGH
+
+# Install pre-commit hook for staged changes
+gh-stats hook install --type=pre-commit --fail-on=CRITICAL
+
+# Remove installed hook
+gh-stats hook uninstall --type=pre-push
+```
+
+### How the Pre-Push Hook Works
+1. Runs automatically on `git push`.
+2. Compares local commits against the upstream base branch (`origin/main`, `main`, etc.).
+3. Evaluates PR risk score, blast radius on sensitive files, and missing test deltas against thresholds configured in `.gh-stats.yml` or `--fail-on`.
+4. **Blocks the push** with actionable remediation guidance if the threshold is met or exceeded:
+
+```text
+🔍 gh-stats: Running shift-left pre-push risk evaluation against [origin/main]...
+📊 Risk Rating: HIGH (Score: 70/100) | Files: 8 | +380 / -45
+🚨 Sensitive Files (2):
+   • .github/workflows/deploy.yml (CI/CD Pipelines)
+   • migrations/004_accounts.sql (Database Migrations)
+
+❌ PUSH BLOCKED: Risk level [HIGH] meets or exceeds threshold [HIGH] (Score: 70/100)
+💡 SRE Shift-Left Guidance:
+   • Add automated tests for the +380 lines of newly added code.
+   • Sensitive infrastructure, security, or database migration files were modified.
+💡 To bypass this check:
+   git push --no-verify
+   OR: SKIP_GH_STATS=1 git push
+```
+
+### Bypassing Hooks
+When rapid or emergency pushes are necessary, developers can bypass the hook using standard git flags or an environment variable:
+```bash
+git push --no-verify
+# OR
+SKIP_GH_STATS=1 git push
+```
+
+### Standalone Examples
+Reference standalone hook scripts are available in the [`examples/hooks`](examples/hooks) directory:
+- [`examples/hooks/pre-push`](examples/hooks/pre-push): Pre-push hook script.
+- [`examples/hooks/pre-commit`](examples/hooks/pre-commit): Pre-commit hook script for staged files.
+
+---
+
 ## 🧪 Testing
 
 Run unit tests and race condition checks:
