@@ -567,6 +567,22 @@ input[type="range"] {
   font-size: 0.875rem;
   color: #e2e8f0;
   overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+.terminal-body pre,
+.terminal-body code {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: transparent;
+  padding: 0;
+  border: none;
+  margin: 0;
 }
 
 /* Table styles */

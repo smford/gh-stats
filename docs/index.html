@@ -250,7 +250,7 @@
             <span></span>
           </div>
           <div class="terminal-body">
-<span style="color: #38bdf8;">$ gh-stats --target=release</span>
+<pre><code><span style="color: #38bdf8;">$ gh-stats --target=release</span>
 🔍 gh-stats: running in [RELEASE] mode
 📦 Comparing Release: v0.3.0 ... v0.4.0
 ✅ Release Analysis Complete: Risk=MEDIUM (40/100), Commits=3, Breaking Changes=1, Files=17
@@ -274,7 +274,7 @@
 
 ## 📝 Release Changelog
 ### 🚀 Features
-- [`959165b`] feat: CI Pipeline Latency & Flakiness Detection (@smford)
+- [`959165b`] feat: CI Pipeline Latency & Flakiness Detection (@smford)</code></pre>
           </div>
         </div>
       </div>
@@ -292,7 +292,7 @@
             <span></span>
           </div>
           <div class="terminal-body">
-<span style="color: #38bdf8;">## ⚡ CI Pipeline Latency & Reliability (Check Runs)</span>
+<pre><code><span style="color: #38bdf8;">## ⚡ CI Pipeline Latency & Reliability (Check Runs)</span>
 
 | Metric | Value |
 | :--- | :--- |
@@ -306,7 +306,7 @@
 | :--- | :---: | :---: | :---: | :--- |
 | `Integration Suite` | 1 | `failure` | `success` | <span style="color: #f59e0b; font-weight: bold;">🚨 Flaky</span> (Passed on retry without code changes) |
 
-<span style="color: #ef4444;">❌ Quality Gate Failed: 1 flaky CI check run detected on commit 959165b (--fail-on-flaky)</span>
+<span style="color: #ef4444;">❌ Quality Gate Failed: 1 flaky CI check run detected on commit 959165b (--fail-on-flaky)</span></code></pre>
           </div>
         </div>
       </div>
@@ -324,7 +324,7 @@
             <span></span>
           </div>
           <div class="terminal-body">
-<span style="color: #38bdf8;">$ git push origin feature/payments</span>
+<pre><code><span style="color: #38bdf8;">$ git push origin feature/payments</span>
 🔍 gh-stats: Running shift-left pre-push risk evaluation against [origin/main]...
 📊 Risk Rating: <span style="color: #ef4444; font-weight: bold;">HIGH</span> (Score: 70/100) | Files: 8 | +380 / -45
 🚨 Sensitive Files (2):
@@ -337,7 +337,7 @@
    • Sensitive infrastructure, security, or database migration files were modified.
 💡 To bypass this check in emergencies:
    git push --no-verify
-   OR: SKIP_GH_STATS=1 git push
+   OR: SKIP_GH_STATS=1 git push</code></pre>
           </div>
         </div>
       </div>
@@ -410,7 +410,7 @@ jobs:
           </button>
         </div>
         <div class="terminal-body">
-<span style="color: #64748b;"># .github/workflows/pr-stats.yml</span>
+<pre><code><span style="color: #64748b;"># .github/workflows/pr-stats.yml</span>
 <span style="color: #38bdf8;">name:</span> PR Reliability & Stats
 
 <span style="color: #38bdf8;">on:</span>
@@ -435,7 +435,7 @@ jobs:
           <span style="color: #38bdf8;">target:</span> pr
           <span style="color: #38bdf8;">comment-pr:</span> 'true'
           <span style="color: #38bdf8;">fail-on:</span> 'CRITICAL'
-          <span style="color: #38bdf8;">token:</span> ${{ secrets.GITHUB_TOKEN }}
+          <span style="color: #38bdf8;">token:</span> ${{ secrets.GITHUB_TOKEN }}</code></pre>
         </div>
       </div>
     </div>
