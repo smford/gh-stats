@@ -1,0 +1,17 @@
+# Binaries
+/gh-stats
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test and coverage artifacts
+*.out
+*.test
+*.sarif
+
+# OS / Editor artifacts
+.DS_Store
+.idea/
+.vscode/

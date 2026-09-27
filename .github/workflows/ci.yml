@@ -1,0 +1,55 @@
+name: CI & Quality Gate
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  security-events: write # Required for uploading SARIF to Code Scanning
+  pull-requests: read
+
+jobs:
+  test:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full git history for accurate stats and tests
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Vet & Test
+        run: |
+          go vet ./...
+          go test -v -race ./...
+
+      - name: Build Binary
+        run: |
+          go build -v -o gh-stats ./cmd/gh-stats
+
+  dogfood:
+    name: Dogfood gh-stats Action
+    runs-on: ubuntu-latest
+    needs: [ test ]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for diff and commit history analysis
+
+      - name: Run gh-stats Action
+        uses: ./
+        with:
+          target: auto # Analyzes PR on pull_request events, or repo on push
+          output: gh-stats.sarif
+          upload-sarif: 'true'
+          category: 'gh-stats-dogfood'
+          token: ${{ secrets.GITHUB_TOKEN }}

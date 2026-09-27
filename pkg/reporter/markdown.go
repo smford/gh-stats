@@ -1,0 +1,128 @@
+package reporter
+
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/smford/gh-stats/pkg/analyzer"
+)
+
+// GeneratePRSummary generates a GitHub Step Summary Markdown string for PR analysis.
+func GeneratePRSummary(stats *analyzer.PRStats) string {
+	var sb strings.Builder
+	sb.WriteString("# 🚀 GitHub Stats: Pull Request SRE Assessment\n\n")
+
+	badgeColor := "blue"
+	switch stats.RiskLevel {
+	case "LOW":
+		badgeColor = "green"
+	case "MEDIUM":
+		badgeColor = "yellow"
+	case "HIGH":
+		badgeColor = "orange"
+	case "CRITICAL":
+		badgeColor = "red"
+	}
+
+	sb.WriteString(fmt.Sprintf("> **Overall SRE Risk Rating:** `%s` (Score: **%d / 100**) 🛡️\n\n", stats.RiskLevel, stats.RiskScore))
+	_ = badgeColor
+
+	sb.WriteString("## 📊 Change Metrics\n\n")
+	sb.WriteString("| Metric | Value |\n")
+	sb.WriteString("| :--- | :--- |\n")
+	sb.WriteString(fmt.Sprintf("| **Lines Added** | `+%d` |\n", stats.TotalAdditions))
+	sb.WriteString(fmt.Sprintf("| **Lines Deleted** | `-%d` |\n", stats.TotalDeletions))
+	sb.WriteString(fmt.Sprintf("| **Net Churn** | `%+d` |\n", stats.NetChange))
+	sb.WriteString(fmt.Sprintf("| **Files Modified** | `%d` (Code: `%d`, Tests: `%d`, Docs: `%d`) |\n", stats.FilesChanged, stats.CodeFilesCount, stats.TestFilesCount, stats.DocFilesCount))
+	sb.WriteString(fmt.Sprintf("| **Test vs Code Delta** | `+%d` test lines / `+%d` code lines |\n", stats.TestLinesAdded, stats.CodeLinesAdded))
+	sb.WriteString(fmt.Sprintf("| **Commits** | `%d` |\n", stats.CommitCount))
+
+	if len(stats.SensitiveFiles) > 0 {
+		sb.WriteString("\n## ⚠️ High Blast Radius Files\n\n")
+		sb.WriteString("| Path | Category | Delta |\n")
+		sb.WriteString("| :--- | :--- | :--- |\n")
+		for _, sf := range stats.SensitiveFiles {
+			sb.WriteString(fmt.Sprintf("| `%s` | %s | `+%d / -%d` |\n", sf.Path, sf.Category, sf.Additions, sf.Deletions))
+		}
+	}
+
+	if len(stats.TopChangedFiles) > 0 {
+		sb.WriteString("\n## 📁 Top Modified Files\n\n")
+		sb.WriteString("| File | Additions | Deletions | Net |\n")
+		sb.WriteString("| :--- | :---: | :---: | :---: |\n")
+		limit := len(stats.TopChangedFiles)
+		if limit > 7 {
+			limit = 7
+		}
+		for i := 0; i < limit; i++ {
+			f := stats.TopChangedFiles[i]
+			sb.WriteString(fmt.Sprintf("| `%s` | `+%d` | `-%d` | `%+d` |\n", f.Path, f.Additions, f.Deletions, f.Additions-f.Deletions))
+		}
+	}
+
+	return sb.String()
+}
+
+// GenerateRepoSummary generates a GitHub Step Summary Markdown string for repository analysis.
+func GenerateRepoSummary(stats *analyzer.RepoStats) string {
+	var sb strings.Builder
+	sb.WriteString("# 🏛️ GitHub Stats: Repository Architecture Assessment\n\n")
+
+	sb.WriteString("## 📊 Codebase Composition\n\n")
+	sb.WriteString("| Metric | Value |\n")
+	sb.WriteString("| :--- | :--- |\n")
+	sb.WriteString(fmt.Sprintf("| **Total Tracked Files** | `%d` |\n", stats.TotalFiles))
+	sb.WriteString(fmt.Sprintf("| **Test Files** | `%d` (`%.1f%%` test density) |\n", stats.TestFilesCount, stats.TestFileRatio))
+	sb.WriteString(fmt.Sprintf("| **Documentation Files** | `%d` |\n", stats.DocFilesCount))
+	if len(stats.TopContributors) > 0 {
+		sb.WriteString(fmt.Sprintf("| **Top Contributor Ratio** | `%.1f%%` (%s) |\n", stats.TopAuthorPercentage, stats.TopContributors[0].Author))
+	}
+
+	if len(stats.ExtensionBreakdown) > 0 {
+		sb.WriteString("\n## 📂 File Types\n\n")
+		sb.WriteString("| Extension | Count |\n")
+		sb.WriteString("| :--- | :--- |\n")
+		limit := len(stats.ExtensionBreakdown)
+		if limit > 6 {
+			limit = 6
+		}
+		for i := 0; i < limit; i++ {
+			e := stats.ExtensionBreakdown[i]
+			sb.WriteString(fmt.Sprintf("| `%s` | `%d` |\n", e.Extension, e.Count))
+		}
+	}
+
+	if len(stats.ChurnHotspots) > 0 {
+		sb.WriteString("\n## 🔥 Top Churn Hotspots\n\n")
+		sb.WriteString("| File Path | Modification Frequency |\n")
+		sb.WriteString("| :--- | :---: |\n")
+		limit := len(stats.ChurnHotspots)
+		if limit > 7 {
+			limit = 7
+		}
+		for i := 0; i < limit; i++ {
+			h := stats.ChurnHotspots[i]
+			sb.WriteString(fmt.Sprintf("| `%s` | `%d` commits |\n", h.Path, h.Count))
+		}
+	}
+
+	return sb.String()
+}
+
+// WriteStepSummary writes the markdown summary to GITHUB_STEP_SUMMARY if available.
+func WriteStepSummary(summary string) error {
+	summaryPath := os.Getenv("GITHUB_STEP_SUMMARY")
+	if summaryPath == "" {
+		return nil
+	}
+
+	f, err := os.OpenFile(summaryPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open GITHUB_STEP_SUMMARY: %w", err)
+	}
+	defer f.Close()
+
+	_, err = f.WriteString(summary + "\n")
+	return err
+}

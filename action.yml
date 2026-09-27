@@ -1,0 +1,78 @@
+name: 'GitHub Stats SARIF'
+description: 'Generate SRE and developer health statistics for PRs or repositories and publish them as SARIF code scanning results.'
+author: 'smford'
+branding:
+  icon: 'activity'
+  color: 'blue'
+
+inputs:
+  target:
+    description: 'Target scope to analyze: "pr", "repo", or "auto" (auto detects based on pull_request event)'
+    required: false
+    default: 'auto'
+  base-ref:
+    description: 'Base git reference for PR diff (defaults to GitHub base branch or origin/main)'
+    required: false
+    default: ''
+  head-ref:
+    description: 'Head git reference for PR diff (defaults to HEAD)'
+    required: false
+    default: 'HEAD'
+  output:
+    description: 'File path for the generated SARIF report'
+    required: false
+    default: 'gh-stats.sarif'
+  commit-limit:
+    description: 'Number of recent commits to analyze for hotspot detection in repo mode'
+    required: false
+    default: '200'
+  upload-sarif:
+    description: 'Whether to automatically upload the SARIF report to GitHub Code Scanning'
+    required: false
+    default: 'true'
+  category:
+    description: 'SARIF category name for GitHub Code Scanning'
+    required: false
+    default: 'gh-stats'
+  token:
+    description: 'GitHub token for API access or SARIF upload'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  sarif-file:
+    description: 'Path to the generated SARIF file'
+    value: ${{ steps.run-stats.outputs.sarif-file }}
+  target:
+    description: 'Resolved target mode (pr or repo)'
+    value: ${{ steps.run-stats.outputs.target }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '>=1.22'
+        cache: false
+
+    - name: Run gh-stats
+      id: run-stats
+      shell: bash
+      env:
+        INPUT_TARGET: ${{ inputs.target }}
+        INPUT_BASE_REF: ${{ inputs.base-ref != '' && inputs.base-ref || github.base_ref }}
+        INPUT_HEAD_REF: ${{ inputs.head-ref }}
+        INPUT_SARIF_OUTPUT: ${{ inputs.output }}
+        INPUT_COMMIT_LIMIT: ${{ inputs.commit-limit }}
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: |
+        go run "${{ github.action_path }}/cmd/gh-stats"
+
+    - name: Upload SARIF to GitHub Code Scanning
+      if: ${{ inputs.upload-sarif == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.output }}
+        category: ${{ inputs.category }}
+        token: ${{ inputs.token }}
