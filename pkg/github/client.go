@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -47,6 +48,79 @@ type PRMetadata struct {
 	TimeToFirstReview time.Duration `json:"-"`
 	ReviewsCount      int           `json:"-"`
 	ApprovalsCount    int           `json:"-"`
+	Head              struct {
+		SHA string `json:"sha"`
+		Ref string `json:"ref"`
+	} `json:"head"`
+}
+
+// CheckRun represents an execution of a CI workflow or check.
+type CheckRun struct {
+	ID          int64      `json:"id"`
+	Name        string     `json:"name"`
+	HeadSHA     string     `json:"head_sha"`
+	Status      string     `json:"status"`      // "queued", "in_progress", "completed"
+	Conclusion  string     `json:"conclusion"`  // "success", "failure", "timed_out", "cancelled", "neutral", "skipped"
+	StartedAt   time.Time  `json:"started_at"`
+	CompletedAt *time.Time `json:"completed_at"`
+	HTMLURL     string     `json:"html_url"`
+	DetailsURL  string     `json:"details_url"`
+}
+
+// Duration returns the runtime of the check run.
+func (cr *CheckRun) Duration() time.Duration {
+	if cr.StartedAt.IsZero() {
+		return 0
+	}
+	if cr.CompletedAt != nil && !cr.CompletedAt.IsZero() {
+		if cr.CompletedAt.After(cr.StartedAt) {
+			return cr.CompletedAt.Sub(cr.StartedAt)
+		}
+		return 0
+	}
+	return 0
+}
+
+// CheckRunsResponse wraps the GitHub Check Runs list API response.
+type CheckRunsResponse struct {
+	TotalCount int        `json:"total_count"`
+	CheckRuns  []CheckRun `json:"check_runs"`
+}
+
+// CIPipelineStats aggregates latency, bottlenecks, and flakiness across CI check runs.
+type CIPipelineStats struct {
+	TotalCheckRuns     int               `json:"totalCheckRuns"`
+	SuccessfulRuns     int               `json:"successfulRuns"`
+	FailedRuns         int               `json:"failedRuns"`
+	TimedOutRuns       int               `json:"timedOutRuns"`
+	CancelledRuns      int               `json:"cancelledRuns"`
+	InProgressRuns     int               `json:"inProgressRuns"`
+	TotalDuration      time.Duration     `json:"totalDuration"`
+	LongestRunDuration time.Duration     `json:"longestRunDuration"`
+	LongestRunName     string            `json:"longestRunName,omitempty"`
+	AverageDuration    time.Duration     `json:"averageDuration"`
+	FlakyRuns          []FlakyCheck      `json:"flakyRuns,omitempty"`
+	BottleneckRuns     []CheckRunSummary `json:"bottleneckRuns,omitempty"`
+	CheckRuns          []CheckRun        `json:"checkRuns,omitempty"`
+}
+
+// FlakyCheck details a test or job that exhibited retries or conflicting results on the same commit.
+type FlakyCheck struct {
+	Name           string   `json:"name"`
+	RetryCount     int      `json:"retryCount"`
+	InitialResult  string   `json:"initialResult"`
+	FinalResult    string   `json:"finalResult"`
+	IsFlaky        bool     `json:"isFlaky"`
+	ObservedStates []string `json:"observedStates"`
+}
+
+// CheckRunSummary summarizes a bottleneck or critical check run.
+type CheckRunSummary struct {
+	Name       string        `json:"name"`
+	Duration   time.Duration `json:"duration"`
+	Status     string        `json:"status"`
+	Conclusion string        `json:"conclusion"`
+	HTMLURL    string        `json:"htmlUrl,omitempty"`
 }
 
 // Review represents a PR review.
@@ -350,3 +424,161 @@ func (c *Client) GetCommitActivity(ctx context.Context, ownerRepo string) ([]Com
 
 	return nil, fmt.Errorf("commit activity not ready (timed out)")
 }
+
+// GetCheckRuns fetches all check runs for a commit reference.
+func (c *Client) GetCheckRuns(ctx context.Context, ownerRepo string, ref string) ([]CheckRun, error) {
+	if ref == "" {
+		return nil, fmt.Errorf("ref cannot be empty")
+	}
+
+	endpoint := fmt.Sprintf("/repos/%s/commits/%s/check-runs?filter=all&per_page=100", ownerRepo, ref)
+	req, err := c.newRequest(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API returned status %d for check-runs on %s", resp.StatusCode, ref)
+	}
+
+	var crResp CheckRunsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&crResp); err != nil {
+		return nil, err
+	}
+
+	return crResp.CheckRuns, nil
+}
+
+// GetCIPipelineStats fetches check runs and computes pipeline latency, bottlenecks, and flakiness.
+func (c *Client) GetCIPipelineStats(ctx context.Context, ownerRepo string, ref string, maxLatencyMinutes int) (*CIPipelineStats, error) {
+	if maxLatencyMinutes <= 0 {
+		maxLatencyMinutes = 15
+	}
+
+	checkRuns, err := c.GetCheckRuns(ctx, ownerRepo, ref)
+	if err != nil {
+		return nil, err
+	}
+
+	stats := &CIPipelineStats{
+		TotalCheckRuns: len(checkRuns),
+		CheckRuns:      checkRuns,
+	}
+
+	if len(checkRuns) == 0 {
+		return stats, nil
+	}
+
+	runsByName := make(map[string][]CheckRun)
+	for _, cr := range checkRuns {
+		runsByName[cr.Name] = append(runsByName[cr.Name], cr)
+
+		switch cr.Status {
+		case "in_progress", "queued":
+			stats.InProgressRuns++
+		case "completed":
+			switch cr.Conclusion {
+			case "success":
+				stats.SuccessfulRuns++
+			case "failure":
+				stats.FailedRuns++
+			case "timed_out":
+				stats.TimedOutRuns++
+			case "cancelled":
+				stats.CancelledRuns++
+			}
+		}
+
+		dur := cr.Duration()
+		stats.TotalDuration += dur
+		if dur > stats.LongestRunDuration {
+			stats.LongestRunDuration = dur
+			stats.LongestRunName = cr.Name
+		}
+
+		if dur > time.Duration(maxLatencyMinutes)*time.Minute {
+			stats.BottleneckRuns = append(stats.BottleneckRuns, CheckRunSummary{
+				Name:       cr.Name,
+				Duration:   dur,
+				Status:     cr.Status,
+				Conclusion: cr.Conclusion,
+				HTMLURL:    cr.HTMLURL,
+			})
+		}
+	}
+
+	if stats.TotalCheckRuns > 0 {
+		stats.AverageDuration = stats.TotalDuration / time.Duration(stats.TotalCheckRuns)
+	}
+
+	// Detect Flaky and Retried Checks
+	for name, runs := range runsByName {
+		if len(runs) < 2 {
+			continue
+		}
+
+		sort.Slice(runs, func(i, j int) bool {
+			if runs[i].StartedAt.Equal(runs[j].StartedAt) {
+				return runs[i].ID < runs[j].ID
+			}
+			return runs[i].StartedAt.Before(runs[j].StartedAt)
+		})
+
+		var states []string
+		hasFailureOrTimeout := false
+		hasSuccess := false
+
+		for _, r := range runs {
+			conc := r.Conclusion
+			if conc == "" {
+				conc = r.Status
+			}
+			states = append(states, conc)
+			if conc == "failure" || conc == "timed_out" {
+				hasFailureOrTimeout = true
+			}
+			if conc == "success" {
+				hasSuccess = true
+			}
+		}
+
+		initialResult := runs[0].Conclusion
+		if initialResult == "" {
+			initialResult = runs[0].Status
+		}
+		finalResult := runs[len(runs)-1].Conclusion
+		if finalResult == "" {
+			finalResult = runs[len(runs)-1].Status
+		}
+
+		isFlaky := hasFailureOrTimeout && hasSuccess
+
+		stats.FlakyRuns = append(stats.FlakyRuns, FlakyCheck{
+			Name:           name,
+			RetryCount:     len(runs) - 1,
+			InitialResult:  initialResult,
+			FinalResult:    finalResult,
+			IsFlaky:        isFlaky,
+			ObservedStates: states,
+		})
+	}
+
+	sort.Slice(stats.FlakyRuns, func(i, j int) bool {
+		if stats.FlakyRuns[i].IsFlaky != stats.FlakyRuns[j].IsFlaky {
+			return stats.FlakyRuns[i].IsFlaky
+		}
+		return stats.FlakyRuns[i].RetryCount > stats.FlakyRuns[j].RetryCount
+	})
+
+	return stats, nil
+}
+

@@ -17,6 +17,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Thresholds.CommitLimit != 200 {
 		t.Errorf("expected 200 CommitLimit, got %d", cfg.Thresholds.CommitLimit)
 	}
+	if cfg.Thresholds.MaxCILatencyMinutes != 15 {
+		t.Errorf("expected 15 MaxCILatencyMinutes, got %d", cfg.Thresholds.MaxCILatencyMinutes)
+	}
+	if cfg.Thresholds.FailOnFlakyCI != false {
+		t.Errorf("expected false FailOnFlakyCI, got %v", cfg.Thresholds.FailOnFlakyCI)
+	}
 }
 
 func TestLoadConfigFromYAML(t *testing.T) {
@@ -28,6 +34,9 @@ thresholds:
   min_test_ratio: 0.35
   max_discussions: 10
   commit_limit: 100
+  max_ci_latency_minutes: 20
+  fail_on_flaky_ci: true
+  max_ci_retries: 2
 
 blast_radius:
   custom_patterns:
@@ -63,6 +72,15 @@ fail_on: "HIGH"
 	}
 	if cfg.Thresholds.MinTestRatio != 0.35 {
 		t.Errorf("expected 0.35 MinTestRatio, got %f", cfg.Thresholds.MinTestRatio)
+	}
+	if cfg.Thresholds.MaxCILatencyMinutes != 20 {
+		t.Errorf("expected 20 MaxCILatencyMinutes, got %d", cfg.Thresholds.MaxCILatencyMinutes)
+	}
+	if !cfg.Thresholds.FailOnFlakyCI {
+		t.Errorf("expected true FailOnFlakyCI, got %v", cfg.Thresholds.FailOnFlakyCI)
+	}
+	if cfg.Thresholds.MaxCIRetries != 2 {
+		t.Errorf("expected 2 MaxCIRetries, got %d", cfg.Thresholds.MaxCIRetries)
 	}
 	if cfg.FailOn != "HIGH" {
 		t.Errorf("expected HIGH fail_on, got %s", cfg.FailOn)

@@ -3,8 +3,10 @@ package reporter
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/smford/gh-stats/pkg/analyzer"
+	"github.com/smford/gh-stats/pkg/github"
 )
 
 func TestGeneratePRSummary(t *testing.T) {
@@ -41,6 +43,32 @@ func TestGeneratePRSummary(t *testing.T) {
 	}
 	if !strings.Contains(summaryWithReviewers, "Alice") {
 		t.Errorf("expected Alice in reviewers table, got: %s", summaryWithReviewers)
+	}
+
+	// With CIPipelineStats
+	stats.CIPipelineStats = &github.CIPipelineStats{
+		TotalCheckRuns:     3,
+		SuccessfulRuns:     2,
+		FailedRuns:         1,
+		TotalDuration:      15 * time.Minute,
+		LongestRunName:     "integration-tests",
+		LongestRunDuration: 12 * time.Minute,
+		FlakyRuns: []github.FlakyCheck{
+			{Name: "flaky-test", RetryCount: 1, IsFlaky: true, InitialResult: "failure", FinalResult: "success"},
+		},
+		BottleneckRuns: []github.CheckRunSummary{
+			{Name: "integration-tests", Duration: 12 * time.Minute, Conclusion: "success"},
+		},
+	}
+	summaryWithCI := GeneratePRSummary(stats)
+	if !strings.Contains(summaryWithCI, "CI Pipeline Latency & Reliability") {
+		t.Errorf("expected CI Pipeline section, got: %s", summaryWithCI)
+	}
+	if !strings.Contains(summaryWithCI, "Flaky Checks") {
+		t.Errorf("expected Flaky Checks in CI table, got: %s", summaryWithCI)
+	}
+	if !strings.Contains(summaryWithCI, "integration-tests") {
+		t.Errorf("expected integration-tests in CI table, got: %s", summaryWithCI)
 	}
 }
 

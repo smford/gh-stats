@@ -273,3 +273,69 @@ func TestCustomSensitivePatterns(t *testing.T) {
 		t.Errorf("expected custom pattern to match services/billing/payments/stripe.go")
 	}
 }
+
+func TestPRStatsWithCIPipelineStats(t *testing.T) {
+	stats := &PRStats{
+		BaseRef:        "main",
+		HeadRef:        "feature",
+		PrimaryFile:    "cmd/app/main.go",
+		TotalAdditions: 50,
+		CodeLinesAdded: 50,
+		CIPipelineStats: &github.CIPipelineStats{
+			TotalCheckRuns:     3,
+			SuccessfulRuns:     2,
+			FailedRuns:         1,
+			TotalDuration:      25 * time.Minute,
+			LongestRunDuration: 18 * time.Minute,
+			LongestRunName:     "e2e-tests",
+			BottleneckRuns: []github.CheckRunSummary{
+				{
+					Name:       "e2e-tests",
+					Duration:   18 * time.Minute,
+					Status:     "completed",
+					Conclusion: "success",
+				},
+			},
+			FlakyRuns: []github.FlakyCheck{
+				{
+					Name:           "unit-tests",
+					RetryCount:     1,
+					InitialResult:  "failure",
+					FinalResult:    "success",
+					IsFlaky:        true,
+					ObservedStates: []string{"failure", "success"},
+				},
+			},
+		},
+	}
+
+	calculateRisk(stats)
+	builder := sarif.NewBuilder()
+	stats.PopulateSARIF(builder)
+
+	report := builder.Build()
+	foundLatency := false
+	foundFlakiness := false
+
+	for _, res := range report.Runs[0].Results {
+		if res.RuleID == RulePRCILatency.ID {
+			foundLatency = true
+			if res.Level != "warning" {
+				t.Errorf("expected level warning for CI latency, got %s", res.Level)
+			}
+		}
+		if res.RuleID == RulePRCIFlakiness.ID {
+			foundFlakiness = true
+			if res.Level != "warning" {
+				t.Errorf("expected level warning for CI flakiness, got %s", res.Level)
+			}
+		}
+	}
+
+	if !foundLatency {
+		t.Errorf("expected %s in SARIF results", RulePRCILatency.ID)
+	}
+	if !foundFlakiness {
+		t.Errorf("expected %s in SARIF results", RulePRCIFlakiness.ID)
+	}
+}

@@ -28,11 +28,14 @@ type ExportConfig struct {
 
 // ThresholdsConfig configures limits for PR risk scoring and alerts.
 type ThresholdsConfig struct {
-	MaxPRLines     int     `yaml:"max_pr_lines"`     // default 800
-	StalePRDays    int     `yaml:"stale_pr_days"`    // default 14
-	MinTestRatio   float64 `yaml:"min_test_ratio"`   // default 0.2
-	MaxDiscussions int     `yaml:"max_discussions"`  // default 15
-	CommitLimit    int     `yaml:"commit_limit"`     // default 200
+	MaxPRLines          int     `yaml:"max_pr_lines"`           // default 800
+	StalePRDays         int     `yaml:"stale_pr_days"`          // default 14
+	MinTestRatio        float64 `yaml:"min_test_ratio"`         // default 0.2
+	MaxDiscussions      int     `yaml:"max_discussions"`        // default 15
+	CommitLimit         int     `yaml:"commit_limit"`           // default 200
+	MaxCILatencyMinutes int     `yaml:"max_ci_latency_minutes"` // default 15
+	FailOnFlakyCI       bool    `yaml:"fail_on_flaky_ci"`       // default false
+	MaxCIRetries        int     `yaml:"max_ci_retries"`         // default 1
 }
 
 // BlastRadiusConfig specifies custom sensitive paths.
@@ -56,11 +59,14 @@ type IgnoreConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Thresholds: ThresholdsConfig{
-			MaxPRLines:     800,
-			StalePRDays:    14,
-			MinTestRatio:   0.2,
-			MaxDiscussions: 15,
-			CommitLimit:    200,
+			MaxPRLines:          800,
+			StalePRDays:         14,
+			MinTestRatio:        0.2,
+			MaxDiscussions:      15,
+			CommitLimit:         200,
+			MaxCILatencyMinutes: 15,
+			FailOnFlakyCI:       false,
+			MaxCIRetries:        1,
 		},
 		BlastRadius: BlastRadiusConfig{
 			CustomPatterns: make([]CustomPattern, 0),

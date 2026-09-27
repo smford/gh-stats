@@ -1,0 +1,47 @@
+feat: CI Pipeline Latency & Flakiness Detection (via GitHub Check Runs API)
+
+## Summary
+This PR adds automated **CI Pipeline Latency & Flakiness Detection** to `gh-stats` via the GitHub Check Runs API (`GET /repos/{owner}/{repo}/commits/{ref}/check-runs?filter=all`).
+
+Slow, bottlenecked, and flaky CI pipelines are major contributors to developer friction, context-switching overhead, and delayed release cycles. This feature surfaces critical-path bottlenecks and detects flaky re-run tests on pull request commits, integrating findings into SARIF Code Scanning, Markdown summaries, DORA observability telemetry, and quality gates.
+
+### Key Capabilities
+1. **GitHub Check Runs API Integration (`pkg/github/client.go`):**
+   - Queries `GET /repos/{owner}/{repo}/commits/{ref}/check-runs?filter=all&per_page=100` to retrieve all historical and current check runs on the PR's commit SHA.
+   - Computes individual check run durations, cumulative pipeline runtime, average runtime, and identifies the longest bottleneck check run on the critical path.
+2. **Definitive Flakiness & Retry Detection:**
+   - Chronologically groups runs by check name on the exact same commit.
+   - Detects when a job was retried and exhibited conflicting results (e.g. initial `failure`/`timed_out` followed by `success` on retry).
+   - Surfaces retry counts and execution state progressions.
+3. **SARIF Code Scanning Rules & Alerts (`pkg/analyzer`):**
+   - `GHSTATS008-PR-CI-LATENCY`: Warns when any CI check run exceeds the latency threshold (`max-ci-latency`, default 15m).
+   - `GHSTATS009-PR-CI-FLAKINESS`: Warns when flaky checks are detected, providing actionable remediation guidance.
+   - Factors CI failures, timeouts, flakiness, and bottlenecks into the SRE risk scoring algorithm.
+4. **Rich Step Summary & Sticky Comment Markdown (`pkg/reporter`):**
+   - Renders a dedicated `⚡ CI Pipeline Latency & Reliability (Check Runs)` section in the PR summary.
+   - Details cumulative runtime, critical path bottleneck job, and tables for flaky/retried checks and latency bottlenecks.
+5. **Observability & DORA Telemetry Export (`pkg/exporter`):**
+   - Enriches `DORAMetricsPayload` with `CIPipelineMetrics` (check counts, total duration seconds, longest run seconds/name, flaky runs count) for JSON files and webhook streaming.
+6. **Configurable Quality Gates (`.gh-stats.yml`, CLI flags, and `action.yml`):**
+   - `--max-ci-latency`: Maximum acceptable CI check latency in minutes (default 15).
+   - `--fail-on-flaky`: Blocks the PR / workflow if flaky CI checks are detected.
+   - `action.yml` inputs (`max-ci-latency`, `fail-on-flaky`) and outputs (`flaky-checks-count`, `ci-latency-seconds`).
+7. **Documentation:**
+   - Added a comprehensive guide and sample outputs to `README.md` and `.gh-stats.yml`.
+
+## Changes
+- `pkg/github/client.go`: Added `CheckRun`, `CIPipelineStats`, `FlakyCheck`, `GetCheckRuns()`, and `GetCIPipelineStats()`.
+- `pkg/github/client_test.go`: Added unit tests for check runs and pipeline metrics calculation.
+- `pkg/config/config.go` & `config_test.go`: Added `MaxCILatencyMinutes`, `FailOnFlakyCI`, and `MaxCIRetries`.
+- `pkg/analyzer/analyzer.go`: Added `RulePRCILatency` and `RulePRCIFlakiness` SARIF rules.
+- `pkg/analyzer/pr.go` & `pr_test.go`: Added `CIPipelineStats` to `PRStats`, updated risk calculation, and populated SARIF results.
+- `pkg/reporter/markdown.go` & `markdown_test.go`: Added CI pipeline metrics, flaky checks, and bottleneck tables to PR summaries.
+- `pkg/exporter/exporter.go` & `exporter_test.go`: Added `CIPipelineMetrics` to DORA telemetry export.
+- `cmd/gh-stats/main.go`: Added flags (`-max-ci-latency`, `-fail-on-flaky`, `-check-runs`), CI check run enrichment, quality gate, and outputs.
+- `action.yml`: Exposed `max-ci-latency`, `fail-on-flaky` inputs, and `flaky-checks-count`, `ci-latency-seconds` outputs.
+- `.gh-stats.yml` & `README.md`: Documented new configuration options, CLI flags, and feature architecture.
+
+## Verification
+- `go test -count=1 -race ./...` (All packages passed cleanly)
+- `go vet ./...` (Clean)
+- `shellcheck scripts/*.sh examples/hooks/*` (0 errors, 0 warnings)

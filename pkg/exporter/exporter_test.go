@@ -31,12 +31,23 @@ func TestNewPRPayload(t *testing.T) {
 			{Path: "pkg/auth/token.go", Category: "Auth & Security"},
 		},
 		GitHubMeta: &github.PRMetadata{
-			Number:           42,
-			Age:              48 * time.Hour,
+			Number:            42,
+			Age:               48 * time.Hour,
 			TimeToFirstReview: 2 * time.Hour,
-			TotalDiscussions: 6,
-			ApprovalsCount:   1,
-			ReviewsCount:     2,
+			TotalDiscussions:  6,
+			ApprovalsCount:    1,
+			ReviewsCount:      2,
+		},
+		CIPipelineStats: &github.CIPipelineStats{
+			TotalCheckRuns:     4,
+			SuccessfulRuns:     3,
+			FailedRuns:         1,
+			TotalDuration:      12 * time.Minute,
+			LongestRunDuration: 8 * time.Minute,
+			LongestRunName:     "integration-tests",
+			FlakyRuns: []github.FlakyCheck{
+				{Name: "flaky-job", RetryCount: 1, IsFlaky: true},
+			},
 		},
 	}
 
@@ -58,6 +69,15 @@ func TestNewPRPayload(t *testing.T) {
 	}
 	if payload.PR.TestRatio != 0.2 {
 		t.Errorf("expected test ratio 0.2, got %f", payload.PR.TestRatio)
+	}
+	if payload.PR.CIPipeline == nil {
+		t.Fatalf("expected CIPipeline in payload, got nil")
+	}
+	if payload.PR.CIPipeline.TotalCheckRuns != 4 {
+		t.Errorf("expected 4 total check runs, got %d", payload.PR.CIPipeline.TotalCheckRuns)
+	}
+	if payload.PR.CIPipeline.FlakyRunsCount != 1 {
+		t.Errorf("expected 1 flaky run, got %d", payload.PR.CIPipeline.FlakyRunsCount)
 	}
 	if len(payload.PR.SensitiveCategories) != 1 || payload.PR.SensitiveCategories[0] != "Auth & Security" {
 		t.Errorf("expected 'Auth & Security' category, got %v", payload.PR.SensitiveCategories)

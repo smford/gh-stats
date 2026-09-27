@@ -293,4 +293,36 @@ var (
 		},
 		DefaultConfiguration: &sarif.RuleConfiguration{Level: "note"},
 	}
+
+	RulePRCILatency = sarif.Rule{
+		ID:   "GHSTATS008-PR-CI-LATENCY",
+		Name: "CIPipelineLatencyBottleneck",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "CI pipeline check run exceeds acceptable latency threshold",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "Long-running CI jobs inflate developer turnaround times, elevate Mean Time to Detect (MTTD), and delay deployment rollouts.",
+		},
+		Help: &sarif.MultiformatMessage{
+			Text:     "Optimize slow test suites, parallelize matrix jobs, or introduce test caching to reduce CI pipeline latency.",
+			Markdown: "### SRE CI Guidance\n- **Target Turnaround (<15m)**: Keep pull request CI runs snappy to prevent context switching.\n- **Bottleneck Remediation**: Parallelize test shards, split integration tests, or leverage build caches.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "warning"},
+	}
+
+	RulePRCIFlakiness = sarif.Rule{
+		ID:   "GHSTATS009-PR-CI-FLAKINESS",
+		Name: "CIPipelineFlakinessDetected",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "Flaky CI check run exhibited conflicting results on the same commit",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "A check run failed on an initial run but passed on retry without any code changes on the same commit SHA, indicating test flakiness or environmental instability.",
+		},
+		Help: &sarif.MultiformatMessage{
+			Text:     "Quarantine flaky tests and investigate race conditions, timing issues, or external dependencies.",
+			Markdown: "### SRE Flakiness Guidance\n- **Erosion of Trust**: Flaky tests train engineers to ignore CI signals and blindly re-run jobs.\n- **Action**: Quarantine the flaky test immediately and run in isolation to reproduce timing or concurrency bugs.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "warning"},
+	}
 )
