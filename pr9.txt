@@ -1,56 +1,46 @@
-feat: Semantic Version bump recommendation (--suggest-bump)
+feat: publish and update GitHub Release notes with SRE summary (--publish-release-notes)
 
 ## Summary
-This PR introduces the ability to deterministically recommend the next Semantic Version bump (`--suggest-bump` or `--target=release --suggest-bump`) based on Conventional Commits and file diff deltas across releases and pull requests.
+This PR adds the ability to automatically publish or update GitHub Release notes using the generated SRE release summary (`--publish-release-notes`), providing rich, production-grade release documentation directly in GitHub Releases.
 
-It removes guesswork and custom shell regex from CI/CD delivery pipelines, enabling fully automated, repeatable, and standards-compliant SemVer bumping.
+When deploying a release, manually drafting release notes or relying on basic git commit logs often leaves users and SREs blind to breaking changes, database migrations, and pipeline blast radius. This feature integrates `gh-stats` directly with the GitHub Releases API to publish structured, audit-ready release documentation.
 
 ### Key Capabilities
-1. Deterministic Bump Evaluation (`pkg/analyzer`):
-- MAJOR: If any breaking changes (`feat!:`, `fix!:`, `refactor!:`, or `BREAKING CHANGE:` in subject/body) or database schema migrations (`*.sql`, `migrations/`) are detected.
-- MINOR: If new features (`feat:`, `feat(...)`) are present without breaking changes.
-- PATCH: If only bug fixes (`fix:`), performance optimizations (`perf:`), documentation (`docs:`), chores (`chore:`), or test additions are present.
-- NONE: If no commits or file changes are detected across the comparison range.
-2. Next Semantic Version Calculator:
-- Computes next SemVer string based on latest repository release tag (e.g. `v0.4.0` + `MINOR` -> `v0.5.0`, `v0.4.0` + `MAJOR` -> `v1.0.0`, `v0.4.0` + `PATCH` -> `v0.4.1`).
-- Preserves SemVer tag formats (with or without `v` prefix).
+1. GitHub Releases API Client (`pkg/github`):
+- `GetReleaseByTag`: Retrieves an existing release by tag name (`GET /repos/{owner}/{repo}/releases/tags/{tag}`).
+- `GetReleaseByID`: Retrieves a release by its numeric ID (`GET /repos/{owner}/{repo}/releases/{id}`).
+- `CreateRelease`: Creates a new release (`POST /repos/{owner}/{repo}/releases`).
+- `UpdateRelease`: Updates release body or details (`PATCH /repos/{owner}/{repo}/releases/{id}`).
+- `PublishOrUpdateReleaseNotes`: Intelligent high-level helper that inspects if a release already exists for the tag. If present, it non-destructively preserves existing binary download links or custom headers and updates the SRE release notes section (`<!-- gh-stats-release-notes -->`). If no release exists, it creates one.
+2. CLI Flags (`cmd/gh-stats`):
+- `--publish-release-notes`: Enables publishing or updating GitHub release notes with the SRE release summary.
+- `--release-tag`: Target release tag for publishing release notes. If omitted, automatically detects the tag from GitHub Actions environment (`GITHUB_REF_NAME`, `GITHUB_REF`), release delta `HeadRef`, `SuggestedVersion`, or repository tags.
+- Automatically resolves target mode to `release` when `--publish-release-notes` is provided without explicit target.
 3. GitHub Action Integration (`action.yml`):
-- Added input `suggested-bump: 'true'`.
-- Exposes action outputs: `suggested-bump` (e.g. "minor") and `suggested-version` (e.g. "v0.5.0").
-- Also exposes `version`, `version_number`, `is_new_version`, and `major_tag` for direct plug-and-play usage in release workflows.
-4. Release Workflow Automation (`.github/workflows/release.yml`):
-- Updated `Calculate Semantic Version` step to run `go run ./cmd/gh-stats --target=release --suggest-bump`, replacing custom shell regex with deterministic analysis and emitting SRE readiness directly to `$GITHUB_STEP_SUMMARY`.
-5. Local Git Tag Utilities (`pkg/gitutil`):
-- Added `GetLatestTag()` supporting full SemVer ordering via `git tag -l "v*.*.*" --sort=-v:refname`.
-- Added `IsSemverTag()` helper for tag validation.
-6. Documentation & Step Summary Reporting (`pkg/reporter`, `README.md`):
-- Added `Recommended Bump` metric row in Release Step Summary Markdown table.
-- Added comprehensive section in `README.md` detailing CLI usage, Conventional Commit rules, and GitHub Actions integration.
+- Added input `publish-release-notes: true/false`.
+- Added input `release-tag`.
+- Exposes step outputs `release-id` and `release-url`.
+4. Comprehensive Release Documentation:
+- Includes overall SRE deployment risk score and qualitative risk rating.
+- Includes Release Delta Overview table (additions, deletions, net delta, file breakdown, recommended bump).
+- Highlights Breaking Changes and database schema migrations (`*.sql`, `migrations/`).
+- Generates categorized Conventional Commits changelog (Features 🚀, Bug Fixes 🐛, Performance ⚡, Refactoring 🛠️).
+- Identifies modified High Blast Radius infrastructure, CI/CD, and security files.
+- Lists Release Contributors with commit counts and contribution shares.
+5. Unit Tests and Mocks (`pkg/github/client_test.go`):
+- Added unit tests with mock HTTP test servers for `GetReleaseByTag`, `GetReleaseByID`, `CreateRelease`, `UpdateRelease`, and `PublishOrUpdateReleaseNotes` (both create-new and update-existing scenarios).
+6. Documentation:
+- Updated `README.md` with CLI commands and a complete GitHub Actions release publishing workflow.
 
 ## Changes
-- `pkg/analyzer/semver.go`: Created `CalculateNextVersion()`, `(ReleaseStats).DetermineBump()`, and `(PRStats).DetermineBump()`.
-- `pkg/analyzer/semver_test.go`: Added comprehensive unit and synthetic tests covering major/minor/patch/none bumps, tag calculation, and git repo integration.
-- `pkg/analyzer/release.go`: Added `SuggestedBump` and `SuggestedVersion` fields to `ReleaseStats`, automatically populating them in `AnalyzeRelease()`.
-- `pkg/analyzer/pr.go`: Added `SuggestedBump` and `SuggestedVersion` fields to `PRStats`, automatically populating them in `AnalyzePR()`.
-- `pkg/analyzer/analyzer.go`: Updated Database Migrations sensitive pattern to match `*.sql` files generally.
-- `pkg/gitutil/git.go`: Added `GetLatestTag()` and `IsSemverTag()`.
-- `pkg/gitutil/git_test.go`: Added tests for `GetLatestTag()`, `IsSemverTag()`, and synthetic SemVer tag ordering.
-- `pkg/reporter/markdown.go`: Added `Recommended Bump` row to Release Delta Overview summary table.
-- `cmd/gh-stats/main.go`: Added `--suggest-bump` CLI flag, automated release target defaulting, and exposed GitHub Action outputs.
-- `action.yml`: Declared `suggested-bump` input and `suggested-bump` / `suggested-version` outputs.
-- `.github/workflows/release.yml`: Updated `Calculate Semantic Version` step to run `gh-stats --target=release --suggest-bump`.
-- `scripts/bump-version.sh`: Updated breaking change regex to check SQL migration files.
-- `README.md`: Documented `--suggest-bump` flag, action outputs, and workflow examples.
+- `pkg/github/client.go`: Added `Release` struct, `ReleasePayload` struct, `GetReleaseByTag()`, `GetReleaseByID()`, `CreateRelease()`, `UpdateRelease()`, and `PublishOrUpdateReleaseNotes()`.
+- `pkg/github/client_test.go`: Added mock test suite covering all GitHub Release REST API methods and error handling.
+- `cmd/gh-stats/main.go`: Added `--publish-release-notes` and `--release-tag` flags, auto-tag detection, and release notes publishing logic.
+- `action.yml`: Declared `publish-release-notes` and `release-tag` inputs, and `release-id` and `release-url` outputs.
+- `README.md`: Documented Automated GitHub Release Notes Publishing with CLI flags, options, and GitHub Actions workflow example.
 
 ## Verification
-- `go test -count=1 -race ./...` (All tests passed cleanly with 0 race conditions)
+- `go test -count=1 -race ./...` (All tests passed, 0 race conditions)
 - `go vet ./...` (Clean, 0 warnings)
 - `shellcheck scripts/*.sh examples/hooks/*` (Clean, 0 errors)
-- CLI execution test:
-```text
-$ gh-stats --suggest-bump
-🔍 gh-stats: running in [RELEASE] mode
-📦 Comparing Release: v0.5.0 ... HEAD
-✅ Release Analysis Complete: Risk=MEDIUM (40/100), Commits=5, Breaking Changes=0, Files=8
-🏷️ Suggested Version Bump: MINOR (current: v0.5.0 ➔ next: v0.6.0)
-```
+- Manual CLI verification: verified `-publish-release-notes` and `-release-tag` flag availability and validation.
