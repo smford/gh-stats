@@ -249,3 +249,218 @@ func TestGetCheckRunsAndCIPipelineStats(t *testing.T) {
 	}
 }
 
+func TestGetReleaseByTagAndID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/releases/tags/v1.0.0":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"id": 101,
+				"tag_name": "v1.0.0",
+				"name": "Release v1.0.0",
+				"body": "Initial release notes",
+				"html_url": "https://github.com/owner/repo/releases/tag/v1.0.0"
+			}`))
+		case "/repos/owner/repo/releases/101":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"id": 101,
+				"tag_name": "v1.0.0",
+				"name": "Release v1.0.0",
+				"body": "Initial release notes",
+				"html_url": "https://github.com/owner/repo/releases/tag/v1.0.0"
+			}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient("dummy-token")
+	client.baseURL = server.URL
+	ctx := context.Background()
+
+	// 1. Get by Tag (Found)
+	rel, err := client.GetReleaseByTag(ctx, "owner/repo", "v1.0.0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rel == nil || rel.ID != 101 || rel.TagName != "v1.0.0" {
+		t.Fatalf("expected release 101, got %+v", rel)
+	}
+
+	// 2. Get by Tag (404 Not Found returns nil, nil)
+	notFoundRel, err := client.GetReleaseByTag(ctx, "owner/repo", "v2.0.0")
+	if err != nil {
+		t.Fatalf("unexpected error on 404: %v", err)
+	}
+	if notFoundRel != nil {
+		t.Fatalf("expected nil for 404 release, got %+v", notFoundRel)
+	}
+
+	// 3. Get by ID (Found)
+	relID, err := client.GetReleaseByID(ctx, "owner/repo", 101)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if relID == nil || relID.ID != 101 {
+		t.Fatalf("expected release ID 101, got %+v", relID)
+	}
+
+	// 4. Get by ID (404 Not Found returns nil, nil)
+	notFoundID, err := client.GetReleaseByID(ctx, "owner/repo", 999)
+	if err != nil {
+		t.Fatalf("unexpected error on 404 ID: %v", err)
+	}
+	if notFoundID != nil {
+		t.Fatalf("expected nil for 404 release ID, got %+v", notFoundID)
+	}
+}
+
+func TestCreateAndUpdateRelease(t *testing.T) {
+	created := false
+	updated := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/owner/repo/releases":
+			created = true
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{
+				"id": 202,
+				"tag_name": "v1.1.0",
+				"name": "Release v1.1.0",
+				"body": "SRE Notes",
+				"html_url": "https://github.com/owner/repo/releases/tag/v1.1.0"
+			}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/owner/repo/releases/202":
+			updated = true
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"id": 202,
+				"tag_name": "v1.1.0",
+				"name": "Updated v1.1.0",
+				"body": "Updated Notes",
+				"html_url": "https://github.com/owner/repo/releases/tag/v1.1.0"
+			}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient("dummy-token")
+	client.baseURL = server.URL
+	ctx := context.Background()
+
+	// Test CreateRelease
+	newRel, err := client.CreateRelease(ctx, "owner/repo", ReleasePayload{
+		TagName: "v1.1.0",
+		Name:    "Release v1.1.0",
+		Body:    "SRE Notes",
+	})
+	if err != nil {
+		t.Fatalf("CreateRelease failed: %v", err)
+	}
+	if !created || newRel.ID != 202 {
+		t.Errorf("expected release 202 created, got %+v", newRel)
+	}
+
+	// Test UpdateRelease
+	upRel, err := client.UpdateRelease(ctx, "owner/repo", 202, ReleasePayload{
+		Name: "Updated v1.1.0",
+		Body: "Updated Notes",
+	})
+	if err != nil {
+		t.Fatalf("UpdateRelease failed: %v", err)
+	}
+	if !updated || upRel.Body != "Updated Notes" {
+		t.Errorf("expected updated release notes, got %+v", upRel)
+	}
+}
+
+func TestPublishOrUpdateReleaseNotes(t *testing.T) {
+	t.Run("creates new release when none exists", func(t *testing.T) {
+		created := false
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/releases/tags/v0.7.0":
+				w.WriteHeader(http.StatusNotFound)
+			case r.Method == http.MethodPost && r.URL.Path == "/repos/owner/repo/releases":
+				created = true
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{
+					"id": 303,
+					"tag_name": "v0.7.0",
+					"name": "gh-stats v0.7.0",
+					"body": "Generated Notes",
+					"html_url": "https://github.com/owner/repo/releases/tag/v0.7.0"
+				}`))
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		}))
+		defer server.Close()
+
+		client := NewClient("dummy-token")
+		client.baseURL = server.URL
+
+		rel, err := client.PublishOrUpdateReleaseNotes(context.Background(), "owner/repo", "v0.7.0", "gh-stats v0.7.0", "## SRE Summary")
+		if err != nil {
+			t.Fatalf("PublishOrUpdateReleaseNotes failed: %v", err)
+		}
+		if !created || rel.ID != 303 {
+			t.Errorf("expected release 303 created, got %+v", rel)
+		}
+	})
+
+	t.Run("updates existing release preserving content", func(t *testing.T) {
+		updated := false
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/releases/tags/v0.7.0":
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{
+					"id": 404,
+					"tag_name": "v0.7.0",
+					"name": "gh-stats v0.7.0",
+					"body": "Existing binary download links",
+					"html_url": "https://github.com/owner/repo/releases/tag/v0.7.0"
+				}`))
+			case r.Method == http.MethodPatch && r.URL.Path == "/repos/owner/repo/releases/404":
+				updated = true
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{
+					"id": 404,
+					"tag_name": "v0.7.0",
+					"name": "gh-stats v0.7.0",
+					"body": "Existing binary download links\n\n---\n\n<!-- gh-stats-release-notes -->\n## SRE Summary",
+					"html_url": "https://github.com/owner/repo/releases/tag/v0.7.0"
+				}`))
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+			}
+		}))
+		defer server.Close()
+
+		client := NewClient("dummy-token")
+		client.baseURL = server.URL
+
+		rel, err := client.PublishOrUpdateReleaseNotes(context.Background(), "owner/repo", "v0.7.0", "gh-stats v0.7.0", "## SRE Summary")
+		if err != nil {
+			t.Fatalf("PublishOrUpdateReleaseNotes update failed: %v", err)
+		}
+		if !updated || rel.ID != 404 {
+			t.Errorf("expected release 404 updated, got %+v", rel)
+		}
+	})
+}
+
+
