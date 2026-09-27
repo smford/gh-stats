@@ -35,6 +35,7 @@ type PRStats struct {
 	CommitCount          int
 	Commits              []gitutil.CommitInfo
 	GitHubMeta           *github.PRMetadata       // Optional enrichment from GitHub API
+	CIPipelineStats      *github.CIPipelineStats  // Optional CI pipeline latency and flakiness metrics
 	RecommendedReviewers []ReviewerRecommendation // Suggested domain expert reviewers
 	RiskScore            int                      // 0-100 (higher = riskier)
 	RiskLevel            string                   // "LOW", "MEDIUM", "HIGH", "CRITICAL"
@@ -281,6 +282,25 @@ func calculateRisk(stats *PRStats) {
 		}
 	}
 
+	// 5. CI Pipeline Flakiness and Failures penalty (from GitHub API Check Runs)
+	if stats.CIPipelineStats != nil {
+		if stats.CIPipelineStats.FailedRuns > 0 || stats.CIPipelineStats.TimedOutRuns > 0 {
+			score += 20 // active failure or timeout
+		}
+		flakyCount := 0
+		for _, f := range stats.CIPipelineStats.FlakyRuns {
+			if f.IsFlaky {
+				flakyCount++
+			}
+		}
+		if flakyCount > 0 {
+			score += min(flakyCount*10, 20) // flaky CI penalty
+		}
+		if len(stats.CIPipelineStats.BottleneckRuns) > 0 {
+			score += 5 // slow CI pipeline penalty
+		}
+	}
+
 	if score < 0 {
 		score = 0
 	}
@@ -301,6 +321,11 @@ func calculateRisk(stats *PRStats) {
 	}
 }
 
+// RecalculateRisk re-evaluates the SRE risk score and level after API enrichment.
+func (stats *PRStats) RecalculateRisk() {
+	calculateRisk(stats)
+}
+
 // PopulateSARIF adds the PR analysis rules and results to a SARIF builder.
 func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 	builder.AddRule(RulePRSummary)
@@ -310,6 +335,8 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 	builder.AddRule(RulePRStale)
 	builder.AddRule(RulePRDiscussionChurn)
 	builder.AddRule(RulePRReviewers)
+	builder.AddRule(RulePRCILatency)
+	builder.AddRule(RulePRCIFlakiness)
 
 	maxLines := 800
 	staleDays := 14
@@ -490,19 +517,57 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 			map[string]any{"recommendedReviewers": stats.RecommendedReviewers},
 		)
 	}
+
+	// 8. CI Pipeline Bottlenecks & Flakiness
+	if stats.CIPipelineStats != nil {
+		maxCILatency := 15
+		if stats.Config != nil && stats.Config.Thresholds.MaxCILatencyMinutes > 0 {
+			maxCILatency = stats.Config.Thresholds.MaxCILatencyMinutes
+		}
+
+		for _, b := range stats.CIPipelineStats.BottleneckRuns {
+			builder.AddResult(
+				RulePRCILatency.ID,
+				"warning",
+				fmt.Sprintf("CI pipeline bottleneck: job '%s' took %s (threshold: %dm).", b.Name, formatDuration(b.Duration), maxCILatency),
+				fmt.Sprintf("### ⏳ CI Pipeline Bottleneck: %s\nThis check run executed for **%s** (configured latency limit: %d minutes).\n\nSlow CI check runs delay continuous integration feedback, increase developer wait time, and inflate MTTR during incident rollouts.\n\n**Recommendation:** Shard test suites across parallel workers, cache build dependencies, or move slow end-to-end suites to post-merge pipelines.", b.Name, formatDuration(b.Duration), maxCILatency),
+				stats.PrimaryFile,
+				1,
+				map[string]any{"checkName": b.Name, "durationSeconds": b.Duration.Seconds(), "thresholdMinutes": maxCILatency},
+			)
+		}
+
+		for _, f := range stats.CIPipelineStats.FlakyRuns {
+			if f.IsFlaky {
+				builder.AddResult(
+					RulePRCIFlakiness.ID,
+					"warning",
+					fmt.Sprintf("Flaky CI check detected: '%s' exhibited conflicting results across %d retries (initial: %s, final: %s).", f.Name, f.RetryCount, f.InitialResult, f.FinalResult),
+					fmt.Sprintf("### 🚨 Flaky CI Check Detected: %s\nThis job failed on an initial run and subsequently passed upon retry (**%d retries**, history: `%s`) on the exact same commit.\n\nFlaky CI runs create false negatives, cause release train delays, and encourage dangerous `re-run until green` habits.\n\n**Recommendation:** Quarantine the affected tests and inspect for race conditions, external network dependencies, or shared test state.", f.Name, f.RetryCount, strings.Join(f.ObservedStates, " ➔ ")),
+					stats.PrimaryFile,
+					1,
+					map[string]any{"checkName": f.Name, "retries": f.RetryCount, "initialResult": f.InitialResult, "finalResult": f.FinalResult},
+				)
+			}
+		}
+	}
 }
 
 func formatDuration(d time.Duration) string {
 	days := int(d.Hours() / 24)
 	hours := int(d.Hours()) % 24
 	mins := int(d.Minutes()) % 60
+	secs := int(d.Seconds()) % 60
 	if days > 0 {
 		return fmt.Sprintf("%dd %dh", days, hours)
 	}
 	if hours > 0 {
 		return fmt.Sprintf("%dh %dm", hours, mins)
 	}
-	return fmt.Sprintf("%dm", mins)
+	if mins > 0 {
+		return fmt.Sprintf("%dm %ds", mins, secs)
+	}
+	return fmt.Sprintf("%ds", secs)
 }
 
 func min(a, b int) int {

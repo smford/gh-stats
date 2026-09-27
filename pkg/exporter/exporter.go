@@ -45,10 +45,24 @@ type PRMetrics struct {
 	TestRatio              float64  `json:"testRatio"`
 	SensitiveFilesCount    int      `json:"sensitiveFilesCount"`
 	SensitiveCategories    []string `json:"sensitiveCategories"`
-	DiscussionCount        int      `json:"discussionCount,omitempty"`
-	ApprovalsCount         int      `json:"approvalsCount,omitempty"`
-	ReviewsCount           int      `json:"reviewsCount,omitempty"`
-	CommitsCount           int      `json:"commitsCount"`
+	DiscussionCount        int                `json:"discussionCount,omitempty"`
+	ApprovalsCount         int                `json:"approvalsCount,omitempty"`
+	ReviewsCount           int                `json:"reviewsCount,omitempty"`
+	CommitsCount           int                `json:"commitsCount"`
+	CIPipeline             *CIPipelineMetrics `json:"ciPipeline,omitempty"`
+}
+
+// CIPipelineMetrics encapsulates CI build latency and test flakiness telemetry.
+type CIPipelineMetrics struct {
+	TotalCheckRuns            int     `json:"totalCheckRuns"`
+	SuccessfulRuns            int     `json:"successfulRuns"`
+	FailedRuns                int     `json:"failedRuns"`
+	TimedOutRuns              int     `json:"timedOutRuns"`
+	CancelledRuns             int     `json:"cancelledRuns"`
+	TotalDurationSeconds      float64 `json:"totalDurationSeconds"`
+	LongestRunDurationSeconds float64 `json:"longestRunDurationSeconds"`
+	LongestRunName            string  `json:"longestRunName,omitempty"`
+	FlakyRunsCount            int     `json:"flakyRunsCount"`
 }
 
 // RepoMetrics encapsulates architectural health, bus factor, and churn statistics.
@@ -106,6 +120,26 @@ func NewPRPayload(stats *analyzer.PRStats, repoSlug string) *DORAMetricsPayload 
 		prMetrics.DiscussionCount = stats.GitHubMeta.TotalDiscussions
 		prMetrics.ApprovalsCount = stats.GitHubMeta.ApprovalsCount
 		prMetrics.ReviewsCount = stats.GitHubMeta.ReviewsCount
+	}
+
+	if stats.CIPipelineStats != nil && stats.CIPipelineStats.TotalCheckRuns > 0 {
+		flakyCount := 0
+		for _, f := range stats.CIPipelineStats.FlakyRuns {
+			if f.IsFlaky {
+				flakyCount++
+			}
+		}
+		prMetrics.CIPipeline = &CIPipelineMetrics{
+			TotalCheckRuns:            stats.CIPipelineStats.TotalCheckRuns,
+			SuccessfulRuns:            stats.CIPipelineStats.SuccessfulRuns,
+			FailedRuns:                stats.CIPipelineStats.FailedRuns,
+			TimedOutRuns:              stats.CIPipelineStats.TimedOutRuns,
+			CancelledRuns:             stats.CIPipelineStats.CancelledRuns,
+			TotalDurationSeconds:      stats.CIPipelineStats.TotalDuration.Seconds(),
+			LongestRunDurationSeconds: stats.CIPipelineStats.LongestRunDuration.Seconds(),
+			LongestRunName:            stats.CIPipelineStats.LongestRunName,
+			FlakyRunsCount:            flakyCount,
+		}
 	}
 
 	return &DORAMetricsPayload{

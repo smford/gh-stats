@@ -58,6 +58,14 @@ inputs:
     description: 'HMAC-SHA256 signature secret or Bearer token for webhook dispatch'
     required: false
     default: ''
+  max-ci-latency:
+    description: 'Maximum acceptable CI check latency in minutes (default 15)'
+    required: false
+    default: '15'
+  fail-on-flaky:
+    description: 'Fail workflow if flaky CI checks are detected on the PR'
+    required: false
+    default: 'false'
   token:
     description: 'GitHub token for API access or SARIF upload'
     required: false
@@ -70,6 +78,12 @@ outputs:
   metrics-json:
     description: 'Path to the exported metrics JSON file (if export-json is enabled)'
     value: ${{ steps.run-stats.outputs.metrics-json }}
+  flaky-checks-count:
+    description: 'Number of flaky CI check runs detected on the PR'
+    value: ${{ steps.run-stats.outputs.flaky-checks-count }}
+  ci-latency-seconds:
+    description: 'Total cumulative duration of all CI check runs in seconds'
+    value: ${{ steps.run-stats.outputs.ci-latency-seconds }}
   target:
     description: 'Resolved target mode (pr or repo)'
     value: ${{ steps.run-stats.outputs.target }}
@@ -98,6 +112,8 @@ runs:
         INPUT_EXPORT_JSON: ${{ inputs.export-json }}
         INPUT_EXPORT_WEBHOOK: ${{ inputs.export-webhook }}
         INPUT_WEBHOOK_SECRET: ${{ inputs.webhook-secret }}
+        INPUT_MAX_CI_LATENCY: ${{ inputs.max-ci-latency }}
+        INPUT_FAIL_ON_FLAKY: ${{ inputs.fail-on-flaky }}
         INPUT_TOKEN: ${{ inputs.token }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/smford/gh-stats/pkg/analyzer"
 )
@@ -91,6 +92,55 @@ func GeneratePRSummary(stats *analyzer.PRStats) string {
 		}
 	}
 
+	if stats.CIPipelineStats != nil && stats.CIPipelineStats.TotalCheckRuns > 0 {
+		sb.WriteString("\n## ⚡ CI Pipeline Latency & Reliability (Check Runs)\n\n")
+		sb.WriteString("| Metric | Value |\n")
+		sb.WriteString("| :--- | :--- |\n")
+		sb.WriteString(fmt.Sprintf("| **Check Runs Evaluated** | `%d` total (`%d` passed, `%d` failed) |\n",
+			stats.CIPipelineStats.TotalCheckRuns, stats.CIPipelineStats.SuccessfulRuns, stats.CIPipelineStats.FailedRuns))
+		sb.WriteString(fmt.Sprintf("| **Cumulative CI Runtime** | `%s` |\n", formatDuration(stats.CIPipelineStats.TotalDuration)))
+		if stats.CIPipelineStats.LongestRunName != "" {
+			sb.WriteString(fmt.Sprintf("| **Critical Path Bottleneck** | `%s` (`%s`) |\n",
+				stats.CIPipelineStats.LongestRunName, formatDuration(stats.CIPipelineStats.LongestRunDuration)))
+		}
+
+		flakyCount := 0
+		for _, f := range stats.CIPipelineStats.FlakyRuns {
+			if f.IsFlaky {
+				flakyCount++
+			}
+		}
+		if flakyCount > 0 {
+			sb.WriteString(fmt.Sprintf("| **Flaky Checks** | `🚨 %d detected` |\n", flakyCount))
+		} else {
+			sb.WriteString("| **Flaky Checks** | `0 (stable)` |\n")
+		}
+
+		if len(stats.CIPipelineStats.FlakyRuns) > 0 {
+			sb.WriteString("\n### ⚠️ Flaky & Retried Checks\n\n")
+			sb.WriteString("| Check Run | Retries | Initial Outcome | Final Outcome | Verdict |\n")
+			sb.WriteString("| :--- | :---: | :---: | :---: | :--- |\n")
+			for _, f := range stats.CIPipelineStats.FlakyRuns {
+				statusBadge := "Retried"
+				if f.IsFlaky {
+					statusBadge = "🚨 **Flaky** (Passed on retry)"
+				}
+				sb.WriteString(fmt.Sprintf("| `%s` | `%d` | `%s` | `%s` | %s |\n",
+					f.Name, f.RetryCount, f.InitialResult, f.FinalResult, statusBadge))
+			}
+		}
+
+		if len(stats.CIPipelineStats.BottleneckRuns) > 0 {
+			sb.WriteString("\n### ⏳ CI Latency Bottlenecks\n\n")
+			sb.WriteString("| Check Run | Duration | Status |\n")
+			sb.WriteString("| :--- | :---: | :--- |\n")
+			for _, b := range stats.CIPipelineStats.BottleneckRuns {
+				sb.WriteString(fmt.Sprintf("| `%s` | `%s` | `%s` |\n",
+					b.Name, formatDuration(b.Duration), b.Conclusion))
+			}
+		}
+	}
+
 	return sb.String()
 }
 
@@ -166,3 +216,21 @@ func WriteStepSummary(summary string) error {
 	_, err = f.WriteString(summary + "\n")
 	return err
 }
+
+func formatDuration(d time.Duration) string {
+	days := int(d.Hours() / 24)
+	hours := int(d.Hours()) % 24
+	mins := int(d.Minutes()) % 60
+	secs := int(d.Seconds()) % 60
+	if days > 0 {
+		return fmt.Sprintf("%dd %dh", days, hours)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, mins)
+	}
+	if mins > 0 {
+		return fmt.Sprintf("%dm %ds", mins, secs)
+	}
+	return fmt.Sprintf("%ds", secs)
+}
+

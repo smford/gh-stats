@@ -141,3 +141,111 @@ func TestPostOrUpdatePRComment(t *testing.T) {
 		t.Errorf("expected new comment to be posted")
 	}
 }
+
+func TestGetCheckRunsAndCIPipelineStats(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/owner/repo/commits/abc1234/check-runs" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"total_count": 4,
+				"check_runs": [
+					{
+						"id": 10,
+						"name": "build",
+						"head_sha": "abc1234",
+						"status": "completed",
+						"conclusion": "success",
+						"started_at": "2026-09-27T10:00:00Z",
+						"completed_at": "2026-09-27T10:03:00Z"
+					},
+					{
+						"id": 11,
+						"name": "unit-tests",
+						"head_sha": "abc1234",
+						"status": "completed",
+						"conclusion": "failure",
+						"started_at": "2026-09-27T10:00:00Z",
+						"completed_at": "2026-09-27T10:02:00Z"
+					},
+					{
+						"id": 12,
+						"name": "unit-tests",
+						"head_sha": "abc1234",
+						"status": "completed",
+						"conclusion": "success",
+						"started_at": "2026-09-27T10:05:00Z",
+						"completed_at": "2026-09-27T10:07:00Z"
+					},
+					{
+						"id": 13,
+						"name": "e2e-tests",
+						"head_sha": "abc1234",
+						"status": "completed",
+						"conclusion": "success",
+						"started_at": "2026-09-27T10:00:00Z",
+						"completed_at": "2026-09-27T10:18:00Z"
+					}
+				]
+			}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client := NewClient("dummy-token")
+	client.baseURL = server.URL
+
+	ctx := context.Background()
+	stats, err := client.GetCIPipelineStats(ctx, "owner/repo", "abc1234", 15)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if stats.TotalCheckRuns != 4 {
+		t.Errorf("expected 4 total check runs, got %d", stats.TotalCheckRuns)
+	}
+	if stats.SuccessfulRuns != 3 {
+		t.Errorf("expected 3 successful runs, got %d", stats.SuccessfulRuns)
+	}
+	if stats.FailedRuns != 1 {
+		t.Errorf("expected 1 failed run, got %d", stats.FailedRuns)
+	}
+	if stats.LongestRunName != "e2e-tests" {
+		t.Errorf("expected longest run 'e2e-tests', got %s", stats.LongestRunName)
+	}
+	if stats.LongestRunDuration != 18*time.Minute {
+		t.Errorf("expected longest duration 18m, got %v", stats.LongestRunDuration)
+	}
+	if len(stats.BottleneckRuns) != 1 || stats.BottleneckRuns[0].Name != "e2e-tests" {
+		t.Errorf("expected 1 bottleneck run 'e2e-tests', got %v", stats.BottleneckRuns)
+	}
+	if len(stats.FlakyRuns) != 1 {
+		t.Fatalf("expected 1 flaky run group, got %d", len(stats.FlakyRuns))
+	}
+
+	flaky := stats.FlakyRuns[0]
+	if flaky.Name != "unit-tests" {
+		t.Errorf("expected flaky run 'unit-tests', got %s", flaky.Name)
+	}
+	if !flaky.IsFlaky {
+		t.Errorf("expected IsFlaky to be true")
+	}
+	if flaky.RetryCount != 1 {
+		t.Errorf("expected 1 retry, got %d", flaky.RetryCount)
+	}
+	if flaky.InitialResult != "failure" || flaky.FinalResult != "success" {
+		t.Errorf("expected initial failure and final success, got %s -> %s", flaky.InitialResult, flaky.FinalResult)
+	}
+
+	// Test empty check runs
+	emptyStats, err := client.GetCIPipelineStats(ctx, "owner/repo", "non-existent", 15)
+	if err != nil {
+		t.Fatalf("unexpected error on 404 ref: %v", err)
+	}
+	if emptyStats.TotalCheckRuns != 0 {
+		t.Errorf("expected 0 check runs for 404 ref, got %d", emptyStats.TotalCheckRuns)
+	}
+}
+

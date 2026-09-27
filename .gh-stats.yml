@@ -8,6 +8,8 @@ thresholds:
   min_test_ratio: 0.2      # Minimum ratio of test lines to production lines
   max_discussions: 15      # Discussion comments threshold for review friction alert
   commit_limit: 200        # Commit window for repository churn and hotspot analysis
+  max_ci_latency_minutes: 15 # Maximum acceptable CI job latency before flagging bottleneck
+  fail_on_flaky_ci: false  # Fail quality gate if flaky/retried CI check runs are detected
 
 # Custom blast radius patterns (glob syntax, supports '**' for recursive directory matches)
 blast_radius:

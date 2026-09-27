@@ -245,6 +245,39 @@ gh-stats -target=pr -export-webhook=https://metrics.internal/v1/dora -webhook-se
 
 ---
 
+## ⚡ CI Pipeline Latency & Flakiness Detection (GitHub Check Runs API)
+
+Slow and flaky CI pipelines are among the highest sources of developer friction, context-switching overhead, and deployment delays. When tests intermittently fail, developers are trained to "re-run until green," masking legitimate regressions.
+
+`gh-stats` integrates with the **GitHub Check Runs API** (`GET /repos/{owner}/{repo}/commits/{ref}/check-runs?filter=all`) to provide automated CI observability and quality gates:
+
+- **Pipeline Turnaround & Critical Path Bottlenecks:** Tracks individual job execution times, calculates cumulative pipeline latency, and pinpoints the slowest bottleneck job setting the minimum CI turnaround time.
+- **Definitive Flakiness Detection:** Identifies check runs that were re-run on the exact same commit SHA and exhibited conflicting outcomes (e.g. failed on run 1, passed on retry).
+- **Automated Quality Gates:** Fail workflows when flaky checks occur (`fail-on-flaky: true` or `--fail-on-flaky`) or when individual jobs exceed latency thresholds (`--max-ci-latency=15`).
+- **SARIF Code Scanning Alerts:**
+  - `GHSTATS008-PR-CI-LATENCY`: Flags checks exceeding the maximum latency threshold.
+  - `GHSTATS009-PR-CI-FLAKINESS`: Flags tests with conflicting outcomes across retries on the same commit.
+
+### Sample Step Summary Output:
+
+```markdown
+## ⚡ CI Pipeline Latency & Reliability (Check Runs)
+
+| Metric | Value |
+| :--- | :--- |
+| **Check Runs Evaluated** | `5` total (`4` passed, `1` failed) |
+| **Cumulative CI Runtime** | `24m 12s` |
+| **Critical Path Bottleneck** | `E2E Cypress` (`18m 20s`) |
+| **Flaky Checks** | `🚨 1 detected` |
+
+### ⚠️ Flaky & Retried Checks
+| Check Run | Retries | Initial Outcome | Final Outcome | Verdict |
+| :--- | :---: | :---: | :---: | :--- |
+| `Unit Tests` | 1 | `failure` | `success` | 🚨 **Flaky** (Passed on retry) |
+```
+
+---
+
 ## 💻 Local CLI Usage
 
 You can build and run `gh-stats` locally on any git repository:
@@ -301,6 +334,12 @@ gh-stats -version
         Webhook URL to export DORA & SRE metrics
   -webhook-secret string
         Secret key or bearer token for webhook export
+  -max-ci-latency int
+        Maximum acceptable CI check latency in minutes (default 15)
+  -fail-on-flaky
+        Fail quality gate if flaky CI checks are detected
+  -check-runs
+        Fetch CI check runs for latency and flakiness analysis (default true)
   -version
         Print gh-stats version and exit
   -quiet

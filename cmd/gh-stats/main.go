@@ -45,6 +45,9 @@ func main() {
 		flagExportJSON    string
 		flagExportWebhook string
 		flagWebhookSecret string
+		flagMaxCILatency  int
+		flagFailOnFlaky   bool
+		flagCheckRuns     bool
 	)
 
 	flag.StringVar(&flagTarget, "target", getEnvDefault("INPUT_TARGET", getEnvDefault("INPUT_MODE", "auto")), "Target scope: 'pr', 'repo', or 'auto'")
@@ -62,6 +65,9 @@ func main() {
 	flag.StringVar(&flagExportJSON, "export-json", getEnvDefault("INPUT_EXPORT_JSON", ""), "Path to export DORA & SRE metrics JSON file")
 	flag.StringVar(&flagExportWebhook, "export-webhook", getEnvDefault("INPUT_EXPORT_WEBHOOK", ""), "Webhook URL to export DORA & SRE metrics")
 	flag.StringVar(&flagWebhookSecret, "webhook-secret", getEnvDefault("INPUT_WEBHOOK_SECRET", os.Getenv("WEBHOOK_SECRET")), "Secret key or bearer token for webhook export")
+	flag.IntVar(&flagMaxCILatency, "max-ci-latency", 0, "Maximum acceptable CI check latency in minutes (default 15)")
+	flag.BoolVar(&flagFailOnFlaky, "fail-on-flaky", getEnvDefault("INPUT_FAIL_ON_FLAKY", "false") == "true", "Fail quality gate if flaky CI checks are detected")
+	flag.BoolVar(&flagCheckRuns, "check-runs", true, "Fetch CI check runs for latency and flakiness analysis")
 	flag.BoolVar(&flagQuiet, "quiet", false, "Suppress stdout output")
 	flag.BoolVar(&flagVersion, "version", false, "Print gh-stats version and exit")
 	flag.Parse()
@@ -105,6 +111,15 @@ func main() {
 	}
 	if flagWebhookSecret == "" && cfg.Export.WebhookSecret != "" {
 		flagWebhookSecret = cfg.Export.WebhookSecret
+	}
+	if flagMaxCILatency <= 0 {
+		flagMaxCILatency = cfg.Thresholds.MaxCILatencyMinutes
+		if flagMaxCILatency <= 0 {
+			flagMaxCILatency = 15
+		}
+	}
+	if !flagFailOnFlaky && cfg.Thresholds.FailOnFlakyCI {
+		flagFailOnFlaky = true
 	}
 
 	// Auto-detect repo slug from git remote if not provided
@@ -171,6 +186,46 @@ func main() {
 				stats.GitHubMeta = prMeta
 			}
 		}
+
+		// Optional CI Pipeline Check Runs analysis
+		if flagCheckRuns && ghClient != nil && repoSlug != "" {
+			ref := flagHeadRef
+			if stats.GitHubMeta != nil && stats.GitHubMeta.Head.SHA != "" {
+				ref = stats.GitHubMeta.Head.SHA
+			} else {
+				if sha, err := runner.Exec("rev-parse", flagHeadRef); err == nil && strings.TrimSpace(sha) != "" {
+					ref = strings.TrimSpace(sha)
+				}
+			}
+
+			if !flagQuiet {
+				fmt.Printf("⚡ Fetching CI Check Runs from GitHub API (%s, ref: %s)...\n", repoSlug, ref)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ciStats, err := ghClient.GetCIPipelineStats(ctx, repoSlug, ref, flagMaxCILatency)
+			cancel()
+			if err != nil {
+				if !flagQuiet {
+					fmt.Printf("⚠️ GitHub API Check Runs skipped: %v\n", err)
+				}
+			} else if ciStats != nil && ciStats.TotalCheckRuns > 0 {
+				stats.CIPipelineStats = ciStats
+				if !flagQuiet {
+					flakyCount := 0
+					for _, f := range ciStats.FlakyRuns {
+						if f.IsFlaky {
+							flakyCount++
+						}
+					}
+					fmt.Printf("⚡ CI Pipeline Stats: %d checks, latency=%s, bottleneck=%s (%s), flaky=%d\n",
+						ciStats.TotalCheckRuns, ciStats.TotalDuration.Round(time.Second),
+						ciStats.LongestRunName, ciStats.LongestRunDuration.Round(time.Second),
+						flakyCount)
+				}
+			}
+		}
+
+		stats.RecalculateRisk()
 
 		stats.PopulateSARIF(builder)
 		markdownSummary = reporter.GeneratePRSummary(stats)
@@ -270,6 +325,16 @@ func main() {
 	// Set GitHub Action outputs
 	setGithubOutput("sarif-file", flagOutput)
 	setGithubOutput("target", target)
+	if prStats != nil && prStats.CIPipelineStats != nil {
+		flakyCount := 0
+		for _, f := range prStats.CIPipelineStats.FlakyRuns {
+			if f.IsFlaky {
+				flakyCount++
+			}
+		}
+		setGithubOutput("flaky-checks-count", fmt.Sprintf("%d", flakyCount))
+		setGithubOutput("ci-latency-seconds", fmt.Sprintf("%.0f", prStats.CIPipelineStats.TotalDuration.Seconds()))
+	}
 
 	if !flagQuiet && os.Getenv("GITHUB_ACTIONS") == "" {
 		fmt.Println("\n" + markdownSummary)
@@ -315,6 +380,20 @@ func main() {
 		if analyzer.IsRiskThresholdMet(prStats.RiskLevel, flagFailOn) {
 			fmt.Fprintf(os.Stderr, "❌ Quality Gate Failed: PR SRE risk level [%s] meets or exceeds fail-on threshold [%s]\n",
 				prStats.RiskLevel, strings.ToUpper(flagFailOn))
+			os.Exit(2)
+		}
+	}
+
+	// Quality gate enforcement for flaky CI checks if configured
+	if target == "pr" && prStats != nil && prStats.CIPipelineStats != nil && flagFailOnFlaky {
+		flakyCount := 0
+		for _, f := range prStats.CIPipelineStats.FlakyRuns {
+			if f.IsFlaky {
+				flakyCount++
+			}
+		}
+		if flakyCount > 0 {
+			fmt.Fprintf(os.Stderr, "❌ Quality Gate Failed: %d flaky CI check run(s) detected\n", flakyCount)
 			os.Exit(2)
 		}
 	}
