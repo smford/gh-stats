@@ -29,7 +29,9 @@ When deploying a release, manually drafting release notes or relying on basic gi
 - Lists Release Contributors with commit counts and contribution shares.
 5. Unit Tests and Mocks (`pkg/github/client_test.go`):
 - Added unit tests with mock HTTP test servers for `GetReleaseByTag`, `GetReleaseByID`, `CreateRelease`, `UpdateRelease`, and `PublishOrUpdateReleaseNotes` (both create-new and update-existing scenarios).
-6. Documentation:
+6. Demonstration Workflow (`.github/workflows/publish-release-notes.yml`):
+- Created a manually triggered (`workflow_dispatch`) GitHub Action workflow demonstrating release notes generation and publishing with configurable inputs (`release_tag`, `base_ref`, `head_ref`).
+7. Documentation:
 - Updated `README.md` with CLI commands and a complete GitHub Actions release publishing workflow.
 
 ## Changes
@@ -37,6 +39,7 @@ When deploying a release, manually drafting release notes or relying on basic gi
 - `pkg/github/client_test.go`: Added mock test suite covering all GitHub Release REST API methods and error handling.
 - `cmd/gh-stats/main.go`: Added `--publish-release-notes` and `--release-tag` flags, auto-tag detection, and release notes publishing logic.
 - `action.yml`: Declared `publish-release-notes` and `release-tag` inputs, and `release-id` and `release-url` outputs.
+- `.github/workflows/publish-release-notes.yml`: Added manual `workflow_dispatch` demonstration workflow.
 - `README.md`: Documented Automated GitHub Release Notes Publishing with CLI flags, options, and GitHub Actions workflow example.
 
 ## Verification
