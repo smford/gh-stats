@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/smford/gh-stats/pkg/config"
 	"github.com/smford/gh-stats/pkg/sarif"
 )
 
@@ -12,6 +13,28 @@ type SensitivePattern struct {
 	Category    string
 	Description string
 	Match       func(path string) bool
+}
+
+// SensitivePatternsWithConfig returns default sensitive patterns merged with user-defined custom patterns.
+func SensitivePatternsWithConfig(cfg *config.Config) []SensitivePattern {
+	patterns := DefaultSensitivePatterns()
+	if cfg == nil {
+		return patterns
+	}
+
+	for _, cp := range cfg.BlastRadius.CustomPatterns {
+		patternStr := cp.Pattern
+		cat := cp.Category
+		desc := cp.Description
+		patterns = append(patterns, SensitivePattern{
+			Category:    cat,
+			Description: desc,
+			Match: func(path string) bool {
+				return config.MatchGlob(patternStr, path)
+			},
+		})
+	}
+	return patterns
 }
 
 // DefaultSensitivePatterns returns standard SRE sensitive file classifications.

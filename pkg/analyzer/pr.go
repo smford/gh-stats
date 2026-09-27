@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/smford/gh-stats/pkg/config"
 	"github.com/smford/gh-stats/pkg/github"
 	"github.com/smford/gh-stats/pkg/gitutil"
 	"github.com/smford/gh-stats/pkg/sarif"
@@ -13,31 +14,32 @@ import (
 
 // PRStats contains calculated statistics and SRE metrics for a pull request.
 type PRStats struct {
-	BaseRef            string
-	HeadRef            string
-	TotalAdditions     int
-	TotalDeletions     int
-	NetChange          int
-	FilesChanged       int
-	TestFilesCount     int
-	DocFilesCount      int
-	CodeFilesCount      int
-	GeneratedFilesCount int
-	TestLinesAdded      int
-	TestLinesDeleted    int
-	CodeLinesAdded      int
-	CodeLinesDeleted    int
-	GeneratedLinesAdded int
+	BaseRef              string
+	HeadRef              string
+	TotalAdditions       int
+	TotalDeletions       int
+	NetChange            int
+	FilesChanged         int
+	TestFilesCount       int
+	DocFilesCount        int
+	CodeFilesCount       int
+	GeneratedFilesCount  int
+	TestLinesAdded       int
+	TestLinesDeleted     int
+	CodeLinesAdded       int
+	CodeLinesDeleted     int
+	GeneratedLinesAdded  int
 	GeneratedLinesDeleted int
-	SensitiveFiles      []SensitiveMatch
-	TopChangedFiles     []gitutil.FileDiffStat
-	CommitCount         int
-	Commits             []gitutil.CommitInfo
-	GitHubMeta          *github.PRMetadata       // Optional enrichment from GitHub API
+	SensitiveFiles       []SensitiveMatch
+	TopChangedFiles      []gitutil.FileDiffStat
+	CommitCount          int
+	Commits              []gitutil.CommitInfo
+	GitHubMeta           *github.PRMetadata       // Optional enrichment from GitHub API
 	RecommendedReviewers []ReviewerRecommendation // Suggested domain expert reviewers
-	RiskScore           int                      // 0-100 (higher = riskier)
-	RiskLevel           string                   // "LOW", "MEDIUM", "HIGH", "CRITICAL"
-	PrimaryFile         string                   // representative file for PR-wide SARIF results
+	RiskScore            int                      // 0-100 (higher = riskier)
+	RiskLevel            string                   // "LOW", "MEDIUM", "HIGH", "CRITICAL"
+	PrimaryFile          string                   // representative file for PR-wide SARIF results
+	Config               *config.Config           // Active repository configuration
 }
 
 // ReviewerRecommendation represents a suggested code reviewer with domain expertise.
@@ -57,7 +59,11 @@ type SensitiveMatch struct {
 }
 
 // AnalyzePR inspects git differences between baseRef and headRef and generates PRStats.
-func AnalyzePR(runner *gitutil.Runner, baseRef, headRef string) (*PRStats, error) {
+func AnalyzePR(runner *gitutil.Runner, baseRef, headRef string, cfg *config.Config) (*PRStats, error) {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+
 	diffStats, err := runner.GetDiffStats(baseRef, headRef)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get diff stats between %s and %s: %w", baseRef, headRef, err)
@@ -66,16 +72,22 @@ func AnalyzePR(runner *gitutil.Runner, baseRef, headRef string) (*PRStats, error
 	commits, _ := runner.GetCommits(baseRef, headRef)
 
 	stats := &PRStats{
-		BaseRef:      baseRef,
-		HeadRef:      headRef,
-		FilesChanged: len(diffStats),
-		CommitCount:  len(commits),
-		Commits:      commits,
+		BaseRef:     baseRef,
+		HeadRef:     headRef,
+		CommitCount: len(commits),
+		Commits:     commits,
+		Config:      cfg,
 	}
 
-	patterns := DefaultSensitivePatterns()
+	patterns := SensitivePatternsWithConfig(cfg)
 
+	var validDiffStats []gitutil.FileDiffStat
 	for _, d := range diffStats {
+		if cfg.IsIgnored(d.Path) {
+			continue
+		}
+		validDiffStats = append(validDiffStats, d)
+
 		stats.TotalAdditions += d.Additions
 		stats.TotalDeletions += d.Deletions
 
@@ -113,11 +125,12 @@ func AnalyzePR(runner *gitutil.Runner, baseRef, headRef string) (*PRStats, error
 		}
 	}
 
+	stats.FilesChanged = len(validDiffStats)
 	stats.NetChange = stats.TotalAdditions - stats.TotalDeletions
 
 	// Sort files by total churn
-	sortedFiles := make([]gitutil.FileDiffStat, len(diffStats))
-	copy(sortedFiles, diffStats)
+	sortedFiles := make([]gitutil.FileDiffStat, len(validDiffStats))
+	copy(sortedFiles, validDiffStats)
 	sort.Slice(sortedFiles, func(i, j int) bool {
 		return (sortedFiles[i].Additions + sortedFiles[i].Deletions) > (sortedFiles[j].Additions + sortedFiles[j].Deletions)
 	})
@@ -204,20 +217,40 @@ func findRecommendedReviewers(runner *gitutil.Runner, stats *PRStats) []Reviewer
 func calculateRisk(stats *PRStats) {
 	score := 10 // baseline
 
+	maxLines := 800
+	staleDays := 14
+	minTestRatio := 0.2
+	maxDiscussions := 15
+
+	if stats.Config != nil {
+		if stats.Config.Thresholds.MaxPRLines > 0 {
+			maxLines = stats.Config.Thresholds.MaxPRLines
+		}
+		if stats.Config.Thresholds.StalePRDays > 0 {
+			staleDays = stats.Config.Thresholds.StalePRDays
+		}
+		if stats.Config.Thresholds.MinTestRatio > 0 {
+			minTestRatio = stats.Config.Thresholds.MinTestRatio
+		}
+		if stats.Config.Thresholds.MaxDiscussions > 0 {
+			maxDiscussions = stats.Config.Thresholds.MaxDiscussions
+		}
+	}
+
 	// Discount generated code volume by 90% for human cognitive review load
 	effectiveLines := (stats.CodeLinesAdded + stats.CodeLinesDeleted) +
 		(stats.TestLinesAdded + stats.TestLinesDeleted) +
 		(stats.GeneratedLinesAdded+stats.GeneratedLinesDeleted)/10
 
-	// 1. Size penalty
+	// 1. Size penalty (scaled dynamically relative to maxLines threshold)
 	switch {
-	case effectiveLines > 1500:
+	case effectiveLines > maxLines*2:
 		score += 35
-	case effectiveLines > 800:
+	case effectiveLines > maxLines:
 		score += 25
-	case effectiveLines > 400:
+	case effectiveLines > maxLines/2:
 		score += 15
-	case effectiveLines > 150:
+	case effectiveLines > maxLines/5:
 		score += 5
 	}
 
@@ -231,19 +264,19 @@ func calculateRisk(stats *PRStats) {
 		score += 25
 	} else if stats.CodeLinesAdded > 0 && stats.TestLinesAdded > 0 {
 		ratio := float64(stats.TestLinesAdded) / float64(stats.CodeLinesAdded)
-		if ratio < 0.2 {
+		if ratio < minTestRatio {
 			score += 10
-		} else if ratio >= 0.5 {
+		} else if ratio >= minTestRatio*2.5 {
 			score -= 10 // reward good test hygiene
 		}
 	}
 
 	// 4. Lifecycle & Discussion penalties (from GitHub API if available)
 	if stats.GitHubMeta != nil {
-		if stats.GitHubMeta.Age > 14*24*time.Hour {
+		if stats.GitHubMeta.Age > time.Duration(staleDays)*24*time.Hour {
 			score += 15 // stale PR / branch drift
 		}
-		if stats.GitHubMeta.TotalDiscussions > 15 {
+		if stats.GitHubMeta.TotalDiscussions > maxDiscussions {
 			score += 10 // review friction / misalignment
 		}
 	}
@@ -277,6 +310,21 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 	builder.AddRule(RulePRStale)
 	builder.AddRule(RulePRDiscussionChurn)
 	builder.AddRule(RulePRReviewers)
+
+	maxLines := 800
+	staleDays := 14
+	maxDiscussions := 15
+	if stats.Config != nil {
+		if stats.Config.Thresholds.MaxPRLines > 0 {
+			maxLines = stats.Config.Thresholds.MaxPRLines
+		}
+		if stats.Config.Thresholds.StalePRDays > 0 {
+			staleDays = stats.Config.Thresholds.StalePRDays
+		}
+		if stats.Config.Thresholds.MaxDiscussions > 0 {
+			maxDiscussions = stats.Config.Thresholds.MaxDiscussions
+		}
+	}
 
 	totalLines := stats.TotalAdditions + stats.TotalDeletions
 
@@ -356,15 +404,15 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 	)
 
 	// 2. Excessive Size Result (if applicable)
-	if totalLines > 800 {
+	if totalLines > maxLines {
 		builder.AddResult(
 			RulePRSize.ID,
 			"warning",
-			fmt.Sprintf("Large PR detected: %d lines changed (+%d/-%d). SRE best practice recommends <400 lines to minimize deployment risk.", totalLines, stats.TotalAdditions, stats.TotalDeletions),
-			fmt.Sprintf("### ⚠️ Large Pull Request Warning\nThis PR touches **%d lines of code** across **%d files**.\nLarge changes significantly elevate the mean time to detect (MTTD) and mean time to recover (MTTR) during deployment rollouts.\n\n**Recommendation:** Consider decomposing this PR into smaller, independently testable units.", totalLines, stats.FilesChanged),
+			fmt.Sprintf("Large PR detected: %d lines changed (+%d/-%d). SRE best practice recommends <%d lines to minimize deployment risk.", totalLines, stats.TotalAdditions, stats.TotalDeletions, maxLines/2),
+			fmt.Sprintf("### ⚠️ Large Pull Request Warning\nThis PR touches **%d lines of code** across **%d files** (threshold: %d lines).\nLarge changes significantly elevate the mean time to detect (MTTD) and mean time to recover (MTTR) during deployment rollouts.\n\n**Recommendation:** Consider decomposing this PR into smaller, independently testable units.", totalLines, stats.FilesChanged, maxLines),
 			stats.PrimaryFile,
 			1,
-			map[string]any{"totalLines": totalLines, "threshold": 800},
+			map[string]any{"totalLines": totalLines, "threshold": maxLines},
 		)
 	}
 
@@ -394,29 +442,30 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 		)
 	}
 
-	// 5. Stale PR Warning (if PR open > 14 days)
-	if stats.GitHubMeta != nil && stats.GitHubMeta.Age > 14*24*time.Hour {
+	// 5. Stale PR Warning (if PR open > configured stale days)
+	staleThreshold := time.Duration(staleDays) * 24 * time.Hour
+	if stats.GitHubMeta != nil && stats.GitHubMeta.Age > staleThreshold {
 		builder.AddResult(
 			RulePRStale.ID,
 			"warning",
-			fmt.Sprintf("Stale PR detected: open for %s. SRE recommends rebasing frequently to reduce merge skew.", formatDuration(stats.GitHubMeta.Age)),
-			fmt.Sprintf("### ⚠️ Stale Pull Request Warning\nThis pull request has been open for **%s**.\nLong-lived branches drift from the primary trunk, significantly increasing integration conflict probability and deployment surprises.", formatDuration(stats.GitHubMeta.Age)),
+			fmt.Sprintf("Stale PR detected: open for %s (threshold: %d days). SRE recommends rebasing frequently to reduce merge skew.", formatDuration(stats.GitHubMeta.Age), staleDays),
+			fmt.Sprintf("### ⚠️ Stale Pull Request Warning\nThis pull request has been open for **%s** (configured threshold: %d days).\nLong-lived branches drift from the primary trunk, significantly increasing integration conflict probability and deployment surprises.", formatDuration(stats.GitHubMeta.Age), staleDays),
 			stats.PrimaryFile,
 			1,
-			map[string]any{"ageHours": stats.GitHubMeta.Age.Hours()},
+			map[string]any{"ageHours": stats.GitHubMeta.Age.Hours(), "thresholdDays": staleDays},
 		)
 	}
 
 	// 6. Discussion Churn / Review Friction
-	if stats.GitHubMeta != nil && stats.GitHubMeta.TotalDiscussions > 15 {
+	if stats.GitHubMeta != nil && stats.GitHubMeta.TotalDiscussions > maxDiscussions {
 		builder.AddResult(
 			RulePRDiscussionChurn.ID,
 			"note",
-			fmt.Sprintf("High review friction: %d comments across %d reviews.", stats.GitHubMeta.TotalDiscussions, stats.GitHubMeta.ReviewsCount),
-			fmt.Sprintf("### 💬 High Review Discussion Volume\nThis PR has accumulated **%d comments** across **%d reviews**.\nHigh discussion density often signals architectural ambiguity. Consider a synchronous huddle to unblock.", stats.GitHubMeta.TotalDiscussions, stats.GitHubMeta.ReviewsCount),
+			fmt.Sprintf("High review friction: %d comments across %d reviews (threshold: %d).", stats.GitHubMeta.TotalDiscussions, stats.GitHubMeta.ReviewsCount, maxDiscussions),
+			fmt.Sprintf("### 💬 High Review Discussion Volume\nThis PR has accumulated **%d comments** across **%d reviews** (threshold: %d).\nHigh discussion density often signals architectural ambiguity. Consider a synchronous huddle to unblock.", stats.GitHubMeta.TotalDiscussions, stats.GitHubMeta.ReviewsCount, maxDiscussions),
 			stats.PrimaryFile,
 			1,
-			map[string]any{"totalDiscussions": stats.GitHubMeta.TotalDiscussions, "reviews": stats.GitHubMeta.ReviewsCount},
+			map[string]any{"totalDiscussions": stats.GitHubMeta.TotalDiscussions, "reviews": stats.GitHubMeta.ReviewsCount, "threshold": maxDiscussions},
 		)
 	}
 

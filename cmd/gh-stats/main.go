@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/smford/gh-stats/pkg/analyzer"
+	"github.com/smford/gh-stats/pkg/config"
 	"github.com/smford/gh-stats/pkg/github"
 	"github.com/smford/gh-stats/pkg/gitutil"
 	"github.com/smford/gh-stats/pkg/reporter"
@@ -24,6 +25,7 @@ func main() {
 		flagOutput      string
 		flagRepoPath    string
 		flagCommitLimit int
+		flagConfigPath  string
 		flagToken       string
 		flagPRNumber    int
 		flagRepoSlug    string
@@ -37,7 +39,8 @@ func main() {
 	flag.StringVar(&flagHeadRef, "head", getEnvDefault("INPUT_HEAD_REF", "HEAD"), "Head ref for PR comparison (default HEAD)")
 	flag.StringVar(&flagOutput, "output", getEnvDefault("INPUT_SARIF_OUTPUT", getEnvDefault("INPUT_OUTPUT", "gh-stats.sarif")), "Path to output SARIF file")
 	flag.StringVar(&flagRepoPath, "repo-path", getEnvDefault("INPUT_REPO_PATH", "."), "Path to git repository")
-	flag.IntVar(&flagCommitLimit, "commit-limit", 200, "Maximum commit history to examine for repo hotspots")
+	flag.IntVar(&flagCommitLimit, "commit-limit", 0, "Maximum commit history to examine for repo hotspots (default 200)")
+	flag.StringVar(&flagConfigPath, "config", getEnvDefault("INPUT_CONFIG_PATH", getEnvDefault("INPUT_CONFIG", "")), "Path to .gh-stats.yml configuration file")
 	flag.StringVar(&flagToken, "token", getEnvDefault("INPUT_TOKEN", os.Getenv("GITHUB_TOKEN")), "GitHub API token for metadata enrichment")
 	flag.IntVar(&flagPRNumber, "pr-number", 0, "Pull request number (auto-detected if omitted)")
 	flag.StringVar(&flagRepoSlug, "repo", getEnvDefault("GITHUB_REPOSITORY", ""), "GitHub repository slug owner/repo (auto-detected if omitted)")
@@ -62,6 +65,16 @@ func main() {
 
 	runner := gitutil.NewRunner(flagRepoPath)
 	builder := sarif.NewBuilder()
+
+	cfg, err := config.LoadConfig(flagConfigPath, flagRepoPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error loading configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	if flagFailOn == "" && cfg.FailOn != "" {
+		flagFailOn = cfg.FailOn
+	}
 
 	// Auto-detect repo slug from git remote if not provided
 	repoSlug := flagRepoSlug
@@ -98,7 +111,7 @@ func main() {
 			fmt.Printf("📊 Analyzing PR diff: %s ... %s\n", baseRef, flagHeadRef)
 		}
 
-		stats, err := analyzer.AnalyzePR(runner, baseRef, flagHeadRef)
+		stats, err := analyzer.AnalyzePR(runner, baseRef, flagHeadRef, cfg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "❌ Error analyzing PR: %v\n", err)
 			os.Exit(1)
@@ -149,11 +162,19 @@ func main() {
 		}
 
 	case "repo":
-		if !flagQuiet {
-			fmt.Printf("🏛️ Analyzing Repository (commit window: %d)...\n", flagCommitLimit)
+		commitLimit := flagCommitLimit
+		if commitLimit <= 0 {
+			commitLimit = cfg.Thresholds.CommitLimit
+			if commitLimit <= 0 {
+				commitLimit = 200
+			}
 		}
 
-		stats, err := analyzer.AnalyzeRepo(runner, flagCommitLimit)
+		if !flagQuiet {
+			fmt.Printf("🏛️ Analyzing Repository (commit window: %d)...\n", commitLimit)
+		}
+
+		stats, err := analyzer.AnalyzeRepo(runner, commitLimit, cfg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "❌ Error analyzing repository: %v\n", err)
 			os.Exit(1)
