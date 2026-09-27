@@ -1,0 +1,30 @@
+name: Repository Architecture & Health
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * 1' # Weekly Monday midnight run
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  repo-stats:
+    name: Repo SRE Health
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gh-stats
+        uses: smford/gh-stats@main
+        with:
+          target: repo
+          commit-limit: '250'
+          output: repo-stats.sarif
+          upload-sarif: 'true'
+          category: 'gh-stats-repo'
