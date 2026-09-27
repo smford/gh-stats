@@ -582,3 +582,200 @@ func (c *Client) GetCIPipelineStats(ctx context.Context, ownerRepo string, ref s
 	return stats, nil
 }
 
+// Release represents a GitHub Release object from the REST API.
+type Release struct {
+	ID          int64      `json:"id"`
+	TagName     string     `json:"tag_name"`
+	Name        string     `json:"name"`
+	Body        string     `json:"body"`
+	Draft       bool       `json:"draft"`
+	Prerelease  bool       `json:"prerelease"`
+	HTMLURL     string     `json:"html_url"`
+	CreatedAt   time.Time  `json:"created_at"`
+	PublishedAt *time.Time `json:"published_at"`
+}
+
+// ReleasePayload defines parameters for creating or updating a GitHub Release.
+type ReleasePayload struct {
+	TagName         string `json:"tag_name,omitempty"`
+	TargetCommitish string `json:"target_commitish,omitempty"`
+	Name            string `json:"name,omitempty"`
+	Body            string `json:"body,omitempty"`
+	Draft           *bool  `json:"draft,omitempty"`
+	Prerelease      *bool  `json:"prerelease,omitempty"`
+}
+
+// GetReleaseByTag retrieves a release by its git tag name.
+// Returns nil, nil if the release does not exist (404 Not Found).
+func (c *Client) GetReleaseByTag(ctx context.Context, ownerRepo string, tag string) (*Release, error) {
+	endpoint := fmt.Sprintf("/repos/%s/releases/tags/%s", ownerRepo, tag)
+	req, err := c.newRequest(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API returned status %d for release tag %s", resp.StatusCode, tag)
+	}
+
+	var rel Release
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return nil, err
+	}
+	return &rel, nil
+}
+
+// GetReleaseByID retrieves a release by its numeric release ID.
+// Returns nil, nil if the release does not exist (404 Not Found).
+func (c *Client) GetReleaseByID(ctx context.Context, ownerRepo string, releaseID int64) (*Release, error) {
+	endpoint := fmt.Sprintf("/repos/%s/releases/%d", ownerRepo, releaseID)
+	req, err := c.newRequest(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API returned status %d for release ID %d", resp.StatusCode, releaseID)
+	}
+
+	var rel Release
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return nil, err
+	}
+	return &rel, nil
+}
+
+// CreateRelease creates a new release via POST /repos/{owner}/{repo}/releases.
+func (c *Client) CreateRelease(ctx context.Context, ownerRepo string, payload ReleasePayload) (*Release, error) {
+	endpoint := fmt.Sprintf("/repos/%s/releases", ownerRepo)
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal release payload: %w", err)
+	}
+
+	req, err := c.newRequest(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to create release (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var rel Release
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return nil, err
+	}
+	return &rel, nil
+}
+
+// UpdateRelease updates an existing release via PATCH /repos/{owner}/{repo}/releases/{id}.
+func (c *Client) UpdateRelease(ctx context.Context, ownerRepo string, releaseID int64, payload ReleasePayload) (*Release, error) {
+	endpoint := fmt.Sprintf("/repos/%s/releases/%d", ownerRepo, releaseID)
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal release payload: %w", err)
+	}
+
+	req, err := c.newRequest(ctx, http.MethodPatch, endpoint, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to update release %d (status %d): %s", releaseID, resp.StatusCode, string(respBody))
+	}
+
+	var rel Release
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return nil, err
+	}
+	return &rel, nil
+}
+
+// PublishOrUpdateReleaseNotes creates or updates release notes for the specified tag.
+// If a release with tag exists, its body is updated (preserving existing text if non-empty,
+// or replacing/updating the gh-stats notes section).
+// If no release exists for the tag, a new release is created with the notes.
+func (c *Client) PublishOrUpdateReleaseNotes(ctx context.Context, ownerRepo string, tag string, releaseName string, notes string) (*Release, error) {
+	if tag == "" {
+		return nil, fmt.Errorf("release tag cannot be empty")
+	}
+
+	existing, err := c.GetReleaseByTag(ctx, ownerRepo, tag)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check existing release for tag %s: %w", tag, err)
+	}
+
+	marker := "<!-- gh-stats-release-notes -->"
+	formattedNotes := fmt.Sprintf("%s\n%s", marker, strings.TrimSpace(notes))
+
+	if existing != nil {
+		newBody := formattedNotes
+		if existing.Body != "" {
+			if strings.Contains(existing.Body, marker) {
+				parts := strings.Split(existing.Body, marker)
+				newBody = strings.TrimSpace(parts[0])
+				if newBody != "" {
+					newBody += "\n\n"
+				}
+				newBody += formattedNotes
+			} else {
+				newBody = fmt.Sprintf("%s\n\n---\n\n%s", strings.TrimSpace(existing.Body), formattedNotes)
+			}
+		}
+
+		payload := ReleasePayload{
+			Body: newBody,
+		}
+		if existing.Name == "" && releaseName != "" {
+			payload.Name = releaseName
+		}
+		return c.UpdateRelease(ctx, ownerRepo, existing.ID, payload)
+	}
+
+	if releaseName == "" {
+		releaseName = tag
+	}
+	payload := ReleasePayload{
+		TagName: tag,
+		Name:    releaseName,
+		Body:    formattedNotes,
+	}
+	return c.CreateRelease(ctx, ownerRepo, payload)
+}
+

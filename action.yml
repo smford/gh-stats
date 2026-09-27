@@ -70,6 +70,14 @@ inputs:
     description: 'Calculate and output recommended next Semantic Version bump and version string'
     required: false
     default: 'false'
+  publish-release-notes:
+    description: 'Publish or update GitHub release notes with the generated SRE release summary'
+    required: false
+    default: 'false'
+  release-tag:
+    description: 'Target release tag for publishing release notes (auto-detected if omitted)'
+    required: false
+    default: ''
   token:
     description: 'GitHub token for API access or SARIF upload'
     required: false
@@ -112,6 +120,12 @@ outputs:
   suggested-version:
     description: 'Recommended next Semantic Version string (e.g. "v0.5.0")'
     value: ${{ steps.run-stats.outputs.suggested-version }}
+  release-id:
+    description: 'ID of the published or updated GitHub Release'
+    value: ${{ steps.run-stats.outputs.release-id }}
+  release-url:
+    description: 'HTML URL of the published or updated GitHub Release'
+    value: ${{ steps.run-stats.outputs.release-url }}
   target:
     description: 'Resolved target mode (pr, repo, or release)'
     value: ${{ steps.run-stats.outputs.target }}
@@ -143,6 +157,8 @@ runs:
         INPUT_MAX_CI_LATENCY: ${{ inputs.max-ci-latency }}
         INPUT_FAIL_ON_FLAKY: ${{ inputs.fail-on-flaky }}
         INPUT_SUGGEST_BUMP: ${{ inputs.suggested-bump }}
+        INPUT_PUBLISH_RELEASE_NOTES: ${{ inputs.publish-release-notes }}
+        INPUT_RELEASE_TAG: ${{ inputs.release-tag }}
         INPUT_TOKEN: ${{ inputs.token }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |
