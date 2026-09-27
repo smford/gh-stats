@@ -35,14 +35,19 @@ Preparing a release candidate or deploying a milestone requires understanding th
 9. **GitHub Action & Documentation Updates:**
    - Updated `action.yml` inputs and added outputs: `release-base-ref`, `release-head-ref`, `release-commits-count`, `release-breaking-count`, `release-risk-level`, and `release-risk-score`.
    - Updated `README.md` and `.gh-stats.yml` with comprehensive documentation, CLI usage examples, and a complete GitHub Actions release workflow.
+10. **Synthetic Testing & Manual Workflow:**
+   - Added end-to-end synthetic test suite in `pkg/analyzer/release_test.go` and `scripts/test-synthetic-release.sh`.
+   - Added manually triggered GitHub Actions workflow `.github/workflows/test-release-comparison.yml` (`workflow_dispatch`).
 
 ## Changes
 - `pkg/gitutil/git.go` & `git_test.go`: Added `GetReleaseTags()`, `GetLatestTwoTags()`, `GetPreviousTag()`, `GetInitialCommit()`, and `GetReleaseCommits()`.
 - `pkg/analyzer/analyzer.go`: Added `RuleReleaseSummary`, `RuleReleaseBreaking`, and `RuleReleaseBlastRadius` SARIF rules.
-- `pkg/analyzer/release.go` & `release_test.go`: Created `ReleaseStats`, conventional commit categorization, breaking change detection, release risk scoring, and SARIF population.
+- `pkg/analyzer/release.go` & `release_test.go`: Created `ReleaseStats`, conventional commit categorization, breaking change detection, release risk scoring, SARIF population, and synthetic release comparison test.
 - `pkg/reporter/markdown.go` & `markdown_test.go`: Added `GenerateReleaseSummary()` with release delta overview, breaking changes table, categorized changelog, blast radius, and contributor roster.
 - `pkg/exporter/exporter.go` & `exporter_test.go`: Added `ReleaseMetrics` and `NewReleasePayload()` for DORA telemetry export.
 - `cmd/gh-stats/main.go`: Supported `target == "release"` and `target == "range"`, automatic base/head tag resolution, SARIF/Markdown generation, action outputs, DORA export, and quality gate check.
+- `scripts/test-synthetic-release.sh`: End-to-end synthetic release test script verifying tags, conventional commits, migrations, SARIF, and DORA JSON output.
+- `.github/workflows/test-release-comparison.yml`: Manually dispatched workflow (`workflow_dispatch`) to test synthetic and live release comparison.
 - `action.yml`: Documented release/range target options, updated base/head descriptions, and exposed release action outputs.
 - `.gh-stats.yml`: Updated configuration comments for release mode quality gate.
 - `README.md`: Documented Release Comparison Mode with architectural details, sample step summary, Actions workflow example, and CLI flags.
@@ -51,6 +56,8 @@ Preparing a release candidate or deploying a milestone requires understanding th
 - `go test -count=1 -race ./...` (All tests passed cleanly with 0 race conditions)
 - `go vet ./...` (Clean, 0 warnings)
 - `shellcheck scripts/*.sh examples/hooks/*` (Clean, 0 errors)
+- `./scripts/test-synthetic-release.sh` (Passed cleanly, verified SARIF, DORA JSON, and Markdown)
 - Manual CLI verification:
   - `./gh-stats --target=release` (auto-detected `v0.3.0...v0.4.0`)
   - `./gh-stats --target=range --base=v0.2.0 --head=v0.4.0` (evaluated range and generated valid SARIF)
+

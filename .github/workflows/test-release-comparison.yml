@@ -1,0 +1,84 @@
+name: Test Release Comparison Mode
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: 'Base git ref (tag, branch, or commit SHA; leave empty to auto-detect)'
+        required: false
+        default: ''
+      head_ref:
+        description: 'Head git ref (tag, branch, or commit SHA; leave empty to auto-detect)'
+        required: false
+        default: ''
+      fail_on:
+        description: 'Risk threshold to test quality gate ("CRITICAL", "HIGH", "MEDIUM", "LOW")'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  synthetic-test:
+    name: Run Synthetic Release Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+
+      - name: Run Synthetic Test Script
+        run: |
+          chmod +x ./scripts/test-synthetic-release.sh
+          ./scripts/test-synthetic-release.sh
+
+  live-comparison:
+    name: Live Repository Release Comparison
+    runs-on: ubuntu-latest
+    needs: [ synthetic-test ]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gh-stats in Release Mode
+        id: release-stats
+        uses: ./
+        with:
+          target: release
+          base-ref: ${{ inputs.base_ref }}
+          head-ref: ${{ inputs.head_ref }}
+          fail-on: ${{ inputs.fail_on }}
+          output: live-release-comparison.sarif
+          export-json: live-release-metrics.json
+          upload-sarif: 'true'
+          category: 'gh-stats-release'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Release Metrics JSON Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-release-metrics
+          path: live-release-metrics.json
+          if-no-files-found: ignore
+
+      - name: Display Release Outputs
+        run: |
+          echo "📦 Release Comparison Completed:"
+          echo "  - Base Ref: ${{ steps.release-stats.outputs.release-base-ref }}"
+          echo "  - Head Ref: ${{ steps.release-stats.outputs.release-head-ref }}"
+          echo "  - Commits: ${{ steps.release-stats.outputs.release-commits-count }}"
+          echo "  - Breaking Changes: ${{ steps.release-stats.outputs.release-breaking-count }}"
+          echo "  - Risk Level: ${{ steps.release-stats.outputs.release-risk-level }}"
+          echo "  - Risk Score: ${{ steps.release-stats.outputs.release-risk-score }}"

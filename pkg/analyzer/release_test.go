@@ -1,6 +1,9 @@
 package analyzer
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/smford/gh-stats/pkg/config"
@@ -97,3 +100,101 @@ func TestReleaseStatsRiskCalculation(t *testing.T) {
 		t.Errorf("expected CRITICAL risk level, got %s", stats.RiskLevel)
 	}
 }
+
+func TestSyntheticReleaseComparison(t *testing.T) {
+	tempDir := t.TempDir()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = tempDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v (output: %s)", args, err, string(out))
+		}
+	}
+
+	runGit("init", "-b", "main")
+	runGit("config", "user.name", "Synthetic Bot")
+	runGit("config", "user.email", "bot@example.com")
+	runGit("config", "commit.gpgsign", "false")
+
+	// Base release v1.0.0
+	_ = os.WriteFile(filepath.Join(tempDir, "README.md"), []byte("# Synthetic Project\n"), 0644)
+	_ = os.MkdirAll(filepath.Join(tempDir, "pkg", "api"), 0755)
+	_ = os.WriteFile(filepath.Join(tempDir, "pkg", "api", "api.go"), []byte("package api\n"), 0644)
+	runGit("add", ".")
+	runGit("commit", "-m", "chore: initial v1.0.0 baseline")
+	runGit("tag", "v1.0.0")
+
+	// Delta for v1.1.0
+	// 1. Feature
+	_ = os.WriteFile(filepath.Join(tempDir, "pkg", "api", "api.go"), []byte("package api\nfunc Login() {}\n"), 0644)
+	runGit("add", ".")
+	runGit("commit", "-m", "feat(api): add login endpoint")
+
+	// 2. Breaking change
+	_ = os.WriteFile(filepath.Join(tempDir, "pkg", "api", "api.go"), []byte("package api\nfunc LoginV2() {}\n"), 0644)
+	runGit("add", ".")
+	runGit("commit", "-m", "feat(api)!: break legacy endpoint format")
+
+	// 3. Database migration (Sensitive & Breaking)
+	_ = os.MkdirAll(filepath.Join(tempDir, "migrations"), 0755)
+	_ = os.WriteFile(filepath.Join(tempDir, "migrations", "001_users.sql"), []byte("CREATE TABLE users (id INT);\n"), 0644)
+	runGit("add", ".")
+	runGit("commit", "-m", "feat(db): add user table migration")
+
+	// 4. CI/CD workflow (Blast radius)
+	_ = os.MkdirAll(filepath.Join(tempDir, ".github", "workflows"), 0755)
+	_ = os.WriteFile(filepath.Join(tempDir, ".github", "workflows", "ci.yml"), []byte("name: CI\n"), 0644)
+	runGit("add", ".")
+	runGit("commit", "-m", "ci: add continuous integration workflow")
+
+	// 5. Unit test
+	_ = os.WriteFile(filepath.Join(tempDir, "pkg", "api", "api_test.go"), []byte("package api\nfunc TestLogin() {}\n"), 0644)
+	runGit("add", ".")
+	runGit("commit", "-m", "test(api): add tests for login")
+
+	// Tag v1.1.0
+	runGit("tag", "v1.1.0")
+
+	runner := gitutil.NewRunner(tempDir)
+	cfg := config.DefaultConfig()
+
+	stats, err := AnalyzeRelease(runner, "v1.0.0", "v1.1.0", cfg)
+	if err != nil {
+		t.Fatalf("AnalyzeRelease failed: %v", err)
+	}
+
+	if stats.TotalCommits != 5 {
+		t.Errorf("expected 5 commits, got %d", stats.TotalCommits)
+	}
+	if len(stats.CategorizedCommits.Features) != 3 {
+		t.Errorf("expected 3 feature commits, got %d", len(stats.CategorizedCommits.Features))
+	}
+	if len(stats.BreakingChanges) < 2 {
+		t.Errorf("expected at least 2 breaking changes (conventional + migration), got %d", len(stats.BreakingChanges))
+	}
+	if len(stats.SensitiveFiles) < 2 {
+		t.Errorf("expected at least 2 sensitive files, got %d", len(stats.SensitiveFiles))
+	}
+	if stats.RiskLevel != "CRITICAL" && stats.RiskLevel != "HIGH" {
+		t.Errorf("expected HIGH or CRITICAL risk, got %s", stats.RiskLevel)
+	}
+
+	builder := sarif.NewBuilder()
+	stats.PopulateSARIF(builder)
+	report := builder.Build()
+
+	ruleIDs := make(map[string]bool)
+	for _, rule := range report.Runs[0].Tool.Driver.Rules {
+		ruleIDs[rule.ID] = true
+	}
+	if !ruleIDs[RuleReleaseSummary.ID] {
+		t.Errorf("expected RuleReleaseSummary in SARIF rules")
+	}
+	if !ruleIDs[RuleReleaseBreaking.ID] {
+		t.Errorf("expected RuleReleaseBreaking in SARIF rules")
+	}
+	if !ruleIDs[RuleReleaseBlastRadius.ID] {
+		t.Errorf("expected RuleReleaseBlastRadius in SARIF rules")
+	}
+}
+
