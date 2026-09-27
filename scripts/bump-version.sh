@@ -39,8 +39,8 @@ else
 
     BUMP_TYPE="patch"
 
-    # Check for breaking changes
-    if echo "$COMMITS" | grep -Eq 'BREAKING CHANGE:|^[a-z]+(\([a-z0-9_-]+\))?!:'; then
+    # Check for breaking changes (conventional commits or database migrations)
+    if echo "$COMMITS" | grep -Eq 'BREAKING CHANGE:|^[a-z]+(\([a-z0-9_-]+\))?!:' || echo "$CODE_DIFF" | grep -Eq '\.sql$|migrations/'; then
       BUMP_TYPE="major"
     # Check for features
     elif echo "$COMMITS" | grep -Eq '^([0-9a-f]+ )?feat(\([a-z0-9_-]+\))?:'; then

@@ -223,6 +223,13 @@ func GenerateReleaseSummary(stats *analyzer.ReleaseStats) string {
 	}
 	sb.WriteString(fmt.Sprintf("| **Files Modified** | `%d` (%s) |\n", stats.FilesChanged, fileBreakdown))
 	sb.WriteString(fmt.Sprintf("| **Test vs Code Delta** | `+%d` test lines / `+%d` code lines (%.1f%%) |\n", stats.TestLinesAdded, stats.CodeLinesAdded, stats.TestRatio*100))
+	if stats.SuggestedBump != "" && stats.SuggestedBump != "none" {
+		nextVerStr := ""
+		if stats.SuggestedVersion != "" {
+			nextVerStr = fmt.Sprintf(" ➔ `%s`", stats.SuggestedVersion)
+		}
+		sb.WriteString(fmt.Sprintf("| **Recommended Bump** | `%s`%s |\n", strings.ToUpper(stats.SuggestedBump), nextVerStr))
+	}
 
 	// Breaking changes section
 	if len(stats.BreakingChanges) > 0 {

@@ -39,11 +39,10 @@ jobs:
           go vet ./...
           go test -v -race ./...
 
-      - name: Calculate Semantic Version
+      - name: Calculate Semantic Version with gh-stats
         id: semver
         run: |
-          chmod +x scripts/bump-version.sh
-          ./scripts/bump-version.sh
+          go run ./cmd/gh-stats --target=release --suggest-bump
 
       - name: Check If Code Changes Require Release
         if: steps.semver.outputs.is_new_version != 'true'

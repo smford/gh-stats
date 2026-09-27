@@ -71,7 +71,8 @@ func DefaultSensitivePatterns() []SensitivePattern {
 			Description: "Database schema migrations can lock tables, cause replication lag, or induce breaking schema changes.",
 			Match: func(path string) bool {
 				p := filepath.ToSlash(strings.ToLower(path))
-				return strings.Contains(p, "migration") ||
+				return strings.HasSuffix(p, ".sql") ||
+					strings.Contains(p, "migration") ||
 					strings.Contains(p, "/migrations/") ||
 					(strings.Contains(p, "db/") && strings.HasSuffix(p, ".sql"))
 			},

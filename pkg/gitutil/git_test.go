@@ -1,6 +1,9 @@
 package gitutil
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
@@ -89,6 +92,88 @@ func TestGitRunner(t *testing.T) {
 		if commits[0].Hash == "" || commits[0].Subject == "" {
 			t.Errorf("expected valid commit metadata, got %+v", commits[0])
 		}
+	}
+
+	// Test GetLatestTag
+	latestTag, err := runner.GetLatestTag()
+	if err != nil {
+		t.Fatalf("failed to get latest tag: %v", err)
+	}
+	if !IsSemverTag(latestTag) {
+		t.Errorf("expected latest tag to be valid SemVer, got %q", latestTag)
+	}
+}
+
+func TestIsSemverTag(t *testing.T) {
+	tests := []struct {
+		tag      string
+		expected bool
+	}{
+		{"v1.0.0", true},
+		{"v0.4.0", true},
+		{"0.4.0", true},
+		{"v1.2.3-rc1", true},
+		{"v2.0.0+build123", true},
+		{"not-a-tag", false},
+		{"v1", false},
+		{"v1.2", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.tag, func(t *testing.T) {
+			if got := IsSemverTag(tt.tag); got != tt.expected {
+				t.Errorf("IsSemverTag(%q) = %v, expected %v", tt.tag, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSyntheticTagOrdering(t *testing.T) {
+	tempDir := t.TempDir()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = tempDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v (output: %s)", args, err, string(out))
+		}
+	}
+
+	runGit("init", "-b", "main")
+	runGit("config", "user.name", "Tag Tester")
+	runGit("config", "user.email", "tag@example.com")
+	runGit("config", "commit.gpgsign", "false")
+
+	// Create commits and tags: v0.1.0, v0.2.0, v0.10.0, v0.3.0
+	_ = os.WriteFile(filepath.Join(tempDir, "file.txt"), []byte("1"), 0644)
+	runGit("add", "file.txt")
+	runGit("commit", "-m", "commit 1")
+	runGit("tag", "v0.1.0")
+
+	_ = os.WriteFile(filepath.Join(tempDir, "file.txt"), []byte("2"), 0644)
+	runGit("add", "file.txt")
+	runGit("commit", "-m", "commit 2")
+	runGit("tag", "v0.2.0")
+
+	_ = os.WriteFile(filepath.Join(tempDir, "file.txt"), []byte("3"), 0644)
+	runGit("add", "file.txt")
+	runGit("commit", "-m", "commit 3")
+	runGit("tag", "v0.10.0")
+
+	_ = os.WriteFile(filepath.Join(tempDir, "file.txt"), []byte("4"), 0644)
+	runGit("add", "file.txt")
+	runGit("commit", "-m", "commit 4")
+	runGit("tag", "v0.3.0")
+
+	runner := NewRunner(tempDir)
+	latest, err := runner.GetLatestTag()
+	if err != nil {
+		t.Fatalf("GetLatestTag failed: %v", err)
+	}
+
+	// In SemVer ordering, v0.10.0 is greater than v0.3.0
+	if latest != "v0.10.0" {
+		t.Errorf("expected latest SemVer tag to be v0.10.0, got %q", latest)
 	}
 }
 

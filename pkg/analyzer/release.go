@@ -38,6 +38,8 @@ type ReleaseStats struct {
 	RiskLevel           string // "LOW", "MEDIUM", "HIGH", "CRITICAL"
 	PrimaryFile         string
 	Config              *config.Config
+	SuggestedBump       string // "major", "minor", "patch", "none"
+	SuggestedVersion    string // e.g. "v0.5.0"
 }
 
 // ContributorStat represents commit count and share for an author.
@@ -222,6 +224,19 @@ func AnalyzeRelease(runner *gitutil.Runner, baseRef, headRef string, cfg *config
 	})
 
 	stats.CalculateRisk()
+
+	// Calculate deterministic suggested version bump
+	stats.SuggestedBump = stats.DetermineBump()
+	tagToBump := baseRef
+	if !strings.HasPrefix(tagToBump, "v") {
+		if latestTag, err := runner.GetLatestTag(); err == nil && latestTag != "" {
+			tagToBump = latestTag
+		}
+	}
+	if nextVer, err := CalculateNextVersion(tagToBump, stats.SuggestedBump); err == nil {
+		stats.SuggestedVersion = nextVer
+	}
+
 	return stats, nil
 }
 
