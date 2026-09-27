@@ -68,11 +68,11 @@ on:
 permissions:
   contents: read
   security-events: write   # Required to upload SARIF to Code Scanning
-  pull-requests: read
+  pull-requests: write     # Required to post/update sticky comments on the PR
 
 jobs:
   gh-stats:
-    name: SRE PR Analysis
+    name: SRE PR Analysis & Quality Gate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -87,6 +87,8 @@ jobs:
           output: gh-stats.sarif
           upload-sarif: 'true'
           category: 'gh-stats-pr'
+          comment-pr: 'true'   # Posts live sticky comment on PR
+          fail-on: 'CRITICAL'  # Quality gate: blocks PR if risk is CRITICAL
           token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
@@ -142,7 +144,9 @@ jobs:
 | `commit-limit` | Maximum commit history to analyze in `repo` mode | `200` | No |
 | `upload-sarif` | Automatically upload SARIF to GitHub Code Scanning via `@actions/upload-sarif` | `'true'` | No |
 | `category` | SARIF category label in GitHub Code Scanning | `gh-stats` | No |
-| `token` | GitHub token for authentication | `${{ github.token }}` | No |
+| `comment-pr` | Post or update a live sticky Markdown summary comment on the PR conversation thread | `'false'` | No |
+| `fail-on` | Enforce risk budget gating: fail job if risk meets/exceeds threshold (`'CRITICAL'`, `'HIGH'`, `'MEDIUM'`, `'LOW'`) | `''` (disabled) | No |
+| `token` | GitHub token for authentication (API stats, sticky comment, SARIF upload) | `${{ github.token }}` | No |
 
 ### Outputs
 

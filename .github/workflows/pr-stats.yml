@@ -1,0 +1,32 @@
+name: PR Reliability & Stats
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  security-events: write   # Required to upload SARIF report to GitHub Code Scanning
+  pull-requests: write     # Required to post/update sticky comments on the PR
+  issues: write            # Required for issue comments API fallback
+
+jobs:
+  gh-stats-pr:
+    name: SRE PR Quality Gate & Stats
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full git history required for accurate diff analysis
+
+      - name: Run gh-stats
+        uses: ./
+        with:
+          target: pr
+          output: gh-stats-pr.sarif
+          upload-sarif: 'true'
+          category: 'gh-stats-pr'
+          comment-pr: 'true'     # Post/update live sticky comment on PR
+          fail-on: 'CRITICAL'    # Block merge if PR risk is CRITICAL
+          token: ${{ secrets.GITHUB_TOKEN }}

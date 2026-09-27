@@ -109,6 +109,30 @@ func IsDocumentationFile(path string) bool {
 		strings.HasPrefix(p, "docs/")
 }
 
+// IsGeneratedFile checks if a file is machine-generated or minified.
+func IsGeneratedFile(path string) bool {
+	p := filepath.ToSlash(strings.ToLower(path))
+	base := filepath.Base(p)
+	return strings.HasSuffix(p, ".pb.go") ||
+		strings.HasSuffix(p, "_gen.go") ||
+		strings.HasSuffix(p, ".generated.go") ||
+		strings.HasSuffix(p, ".generated.ts") ||
+		strings.HasSuffix(p, ".generated.js") ||
+		strings.HasSuffix(p, ".min.js") ||
+		strings.HasSuffix(p, ".min.css") ||
+		strings.HasSuffix(p, "bundle.js") ||
+		strings.HasSuffix(p, ".swagger.json") ||
+		strings.HasPrefix(base, "mock_") ||
+		strings.HasPrefix(p, "vendor/") ||
+		strings.Contains(p, "/vendor/") ||
+		strings.HasPrefix(p, "third_party/") ||
+		strings.Contains(p, "/third_party/") ||
+		strings.HasPrefix(p, "dist/") ||
+		strings.Contains(p, "/dist/") ||
+		strings.HasPrefix(p, "build/") ||
+		strings.Contains(p, "/build/")
+}
+
 // Rules definitions for SARIF reporting
 var (
 	RulePRSummary = sarif.Rule{

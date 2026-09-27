@@ -30,6 +30,28 @@ func TestIsTestFile(t *testing.T) {
 	}
 }
 
+func TestIsGeneratedFile(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		{"proto/service.pb.go", true},
+		{"api/types_gen.go", true},
+		{"frontend/dist/bundle.js", true},
+		{"frontend/app.min.js", true},
+		{"vendor/github.com/pkg/errors/errors.go", true},
+		{"pkg/analyzer/pr.go", false},
+		{"README.md", false},
+	}
+
+	for _, tt := range tests {
+		got := IsGeneratedFile(tt.path)
+		if got != tt.expected {
+			t.Errorf("IsGeneratedFile(%q) = %v, want %v", tt.path, got, tt.expected)
+		}
+	}
+}
+
 func TestSensitivePatterns(t *testing.T) {
 	patterns := DefaultSensitivePatterns()
 	sensitivePaths := []string{

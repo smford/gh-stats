@@ -90,3 +90,54 @@ func TestGetPRMetadata(t *testing.T) {
 		t.Errorf("expected 2h30m TTFR, got %v", meta.TimeToFirstReview)
 	}
 }
+
+func TestPostOrUpdatePRComment(t *testing.T) {
+	posted := false
+	updated := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/issues/10/comments":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[
+				{"id": 101, "body": "some normal comment"},
+				{"id": 202, "body": "<!-- gh-stats-marker -->\nold stats"}
+			]`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/owner/repo/issues/comments/202":
+			updated = true
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id": 202, "body": "updated"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/owner/repo/issues/10/comments":
+			posted = true
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id": 303, "body": "created"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient("dummy-token")
+	client.baseURL = server.URL
+
+	// Test update existing
+	err := client.PostOrUpdatePRComment(context.Background(), "owner/repo", 10, "<!-- gh-stats-marker -->", "new stats")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !updated {
+		t.Errorf("expected comment 202 to be updated")
+	}
+
+	// Test create new (when marker not found)
+	err = client.PostOrUpdatePRComment(context.Background(), "owner/repo", 10, "<!-- non-existent-marker -->", "new stats")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !posted {
+		t.Errorf("expected new comment to be posted")
+	}
+}

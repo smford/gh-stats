@@ -21,19 +21,22 @@ type PRStats struct {
 	FilesChanged       int
 	TestFilesCount     int
 	DocFilesCount      int
-	CodeFilesCount     int
-	TestLinesAdded     int
-	TestLinesDeleted   int
-	CodeLinesAdded     int
-	CodeLinesDeleted   int
-	SensitiveFiles     []SensitiveMatch
-	TopChangedFiles    []gitutil.FileDiffStat
-	CommitCount        int
-	Commits            []gitutil.CommitInfo
-	GitHubMeta         *github.PRMetadata // Optional enrichment from GitHub API
-	RiskScore          int                // 0-100 (higher = riskier)
-	RiskLevel          string             // "LOW", "MEDIUM", "HIGH", "CRITICAL"
-	PrimaryFile        string             // representative file for PR-wide SARIF results
+	CodeFilesCount      int
+	GeneratedFilesCount int
+	TestLinesAdded      int
+	TestLinesDeleted    int
+	CodeLinesAdded      int
+	CodeLinesDeleted    int
+	GeneratedLinesAdded int
+	GeneratedLinesDeleted int
+	SensitiveFiles      []SensitiveMatch
+	TopChangedFiles     []gitutil.FileDiffStat
+	CommitCount         int
+	Commits             []gitutil.CommitInfo
+	GitHubMeta          *github.PRMetadata // Optional enrichment from GitHub API
+	RiskScore           int                // 0-100 (higher = riskier)
+	RiskLevel           string             // "LOW", "MEDIUM", "HIGH", "CRITICAL"
+	PrimaryFile         string             // representative file for PR-wide SARIF results
 }
 
 // SensitiveMatch notes a sensitive file and its classification.
@@ -70,6 +73,7 @@ func AnalyzePR(runner *gitutil.Runner, baseRef, headRef string) (*PRStats, error
 
 		isTest := IsTestFile(d.Path)
 		isDoc := IsDocumentationFile(d.Path)
+		isGen := IsGeneratedFile(d.Path)
 
 		if isTest {
 			stats.TestFilesCount++
@@ -77,6 +81,10 @@ func AnalyzePR(runner *gitutil.Runner, baseRef, headRef string) (*PRStats, error
 			stats.TestLinesDeleted += d.Deletions
 		} else if isDoc {
 			stats.DocFilesCount++
+		} else if isGen {
+			stats.GeneratedFilesCount++
+			stats.GeneratedLinesAdded += d.Additions
+			stats.GeneratedLinesDeleted += d.Deletions
 		} else {
 			stats.CodeFilesCount++
 			stats.CodeLinesAdded += d.Additions
@@ -121,17 +129,20 @@ func AnalyzePR(runner *gitutil.Runner, baseRef, headRef string) (*PRStats, error
 func calculateRisk(stats *PRStats) {
 	score := 10 // baseline
 
-	totalLines := stats.TotalAdditions + stats.TotalDeletions
+	// Discount generated code volume by 90% for human cognitive review load
+	effectiveLines := (stats.CodeLinesAdded + stats.CodeLinesDeleted) +
+		(stats.TestLinesAdded + stats.TestLinesDeleted) +
+		(stats.GeneratedLinesAdded+stats.GeneratedLinesDeleted)/10
 
 	// 1. Size penalty
 	switch {
-	case totalLines > 1500:
+	case effectiveLines > 1500:
 		score += 35
-	case totalLines > 800:
+	case effectiveLines > 800:
 		score += 25
-	case totalLines > 400:
+	case effectiveLines > 400:
 		score += 15
-	case totalLines > 150:
+	case effectiveLines > 150:
 		score += 5
 	}
 

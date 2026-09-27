@@ -1,9 +1,11 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"regexp"
@@ -127,9 +129,9 @@ func DetectPRNumber() int {
 	return 0
 }
 
-func (c *Client) newRequest(ctx context.Context, method, endpoint string) (*http.Request, error) {
+func (c *Client) newRequest(ctx context.Context, method, endpoint string, body io.Reader) (*http.Request, error) {
 	url := c.baseURL + endpoint
-	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, err
 	}
@@ -141,10 +143,81 @@ func (c *Client) newRequest(ctx context.Context, method, endpoint string) (*http
 	return req, nil
 }
 
+// PRComment represents an issue/PR comment on GitHub.
+type PRComment struct {
+	ID   int64  `json:"id"`
+	Body string `json:"body"`
+}
+
+// PostOrUpdatePRComment posts or updates a sticky comment on a PR.
+func (c *Client) PostOrUpdatePRComment(ctx context.Context, ownerRepo string, prNumber int, marker, body string) error {
+	listEndpoint := fmt.Sprintf("/repos/%s/issues/%d/comments?per_page=100", ownerRepo, prNumber)
+	req, err := c.newRequest(ctx, http.MethodGet, listEndpoint, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var existingComments []PRComment
+	if resp.StatusCode == http.StatusOK {
+		_ = json.NewDecoder(resp.Body).Decode(&existingComments)
+	}
+
+	fullBody := fmt.Sprintf("%s\n\n%s", marker, body)
+	payload, err := json.Marshal(map[string]string{"body": fullBody})
+	if err != nil {
+		return err
+	}
+
+	// Update existing comment if marker matches
+	for _, comm := range existingComments {
+		if strings.Contains(comm.Body, marker) {
+			updateEndpoint := fmt.Sprintf("/repos/%s/issues/comments/%d", ownerRepo, comm.ID)
+			updateReq, err := c.newRequest(ctx, http.MethodPatch, updateEndpoint, bytes.NewReader(payload))
+			if err != nil {
+				return err
+			}
+			updateReq.Header.Set("Content-Type", "application/json")
+			uResp, err := c.httpClient.Do(updateReq)
+			if err != nil {
+				return err
+			}
+			defer uResp.Body.Close()
+			if uResp.StatusCode != http.StatusOK {
+				return fmt.Errorf("failed to update comment, status: %d", uResp.StatusCode)
+			}
+			return nil
+		}
+	}
+
+	// Create new comment
+	createEndpoint := fmt.Sprintf("/repos/%s/issues/%d/comments", ownerRepo, prNumber)
+	createReq, err := c.newRequest(ctx, http.MethodPost, createEndpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	createReq.Header.Set("Content-Type", "application/json")
+	cResp, err := c.httpClient.Do(createReq)
+	if err != nil {
+		return err
+	}
+	defer cResp.Body.Close()
+	if cResp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("failed to create comment, status: %d", cResp.StatusCode)
+	}
+
+	return nil
+}
+
 // GetPRMetadata fetches pull request data and reviews.
 func (c *Client) GetPRMetadata(ctx context.Context, ownerRepo string, prNumber int) (*PRMetadata, error) {
 	endpoint := fmt.Sprintf("/repos/%s/pulls/%d", ownerRepo, prNumber)
-	req, err := c.newRequest(ctx, http.MethodGet, endpoint)
+	req, err := c.newRequest(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +265,7 @@ func (c *Client) GetPRMetadata(ctx context.Context, ownerRepo string, prNumber i
 
 func (c *Client) getPRReviews(ctx context.Context, ownerRepo string, prNumber int) ([]Review, error) {
 	endpoint := fmt.Sprintf("/repos/%s/pulls/%d/reviews?per_page=100", ownerRepo, prNumber)
-	req, err := c.newRequest(ctx, http.MethodGet, endpoint)
+	req, err := c.newRequest(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +290,7 @@ func (c *Client) getPRReviews(ctx context.Context, ownerRepo string, prNumber in
 // GetRepoMetadata fetches repository overview data.
 func (c *Client) GetRepoMetadata(ctx context.Context, ownerRepo string) (*RepoMetadata, error) {
 	endpoint := fmt.Sprintf("/repos/%s", ownerRepo)
-	req, err := c.newRequest(ctx, http.MethodGet, endpoint)
+	req, err := c.newRequest(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +318,7 @@ func (c *Client) GetCommitActivity(ctx context.Context, ownerRepo string) ([]Com
 
 	// Poll up to 3 times if GitHub returns 202 Accepted (computing in background)
 	for attempt := 0; attempt < 3; attempt++ {
-		req, err := c.newRequest(ctx, http.MethodGet, endpoint)
+		req, err := c.newRequest(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
 			return nil, err
 		}

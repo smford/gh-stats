@@ -27,6 +27,8 @@ func main() {
 		flagToken       string
 		flagPRNumber    int
 		flagRepoSlug    string
+		flagFailOn      string
+		flagCommentPR   bool
 		flagQuiet       bool
 	)
 
@@ -39,6 +41,8 @@ func main() {
 	flag.StringVar(&flagToken, "token", getEnvDefault("INPUT_TOKEN", os.Getenv("GITHUB_TOKEN")), "GitHub API token for metadata enrichment")
 	flag.IntVar(&flagPRNumber, "pr-number", 0, "Pull request number (auto-detected if omitted)")
 	flag.StringVar(&flagRepoSlug, "repo", getEnvDefault("GITHUB_REPOSITORY", ""), "GitHub repository slug owner/repo (auto-detected if omitted)")
+	flag.StringVar(&flagFailOn, "fail-on", getEnvDefault("INPUT_FAIL_ON", ""), "Fail workflow if PR risk meets/exceeds threshold (e.g. 'HIGH', 'CRITICAL')")
+	flag.BoolVar(&flagCommentPR, "comment-pr", getEnvDefault("INPUT_COMMENT_PR", "false") == "true", "Post or update a sticky summary comment on the PR")
 	flag.BoolVar(&flagQuiet, "quiet", false, "Suppress stdout output")
 	flag.Parse()
 
@@ -75,6 +79,7 @@ func main() {
 	}
 
 	var markdownSummary string
+	var prStats *analyzer.PRStats
 
 	switch target {
 	case "pr":
@@ -98,6 +103,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "❌ Error analyzing PR: %v\n", err)
 			os.Exit(1)
 		}
+		prStats = stats
 
 		// Optional GitHub API enrichment
 		prNumber := flagPRNumber
@@ -118,13 +124,24 @@ func main() {
 				}
 			} else {
 				stats.GitHubMeta = prMeta
-				// Recalculate risk with PR lifecycle data
-				// Note: calculateRisk is internal to analyzer, but stats.PopulateSARIF runs with it
 			}
 		}
 
 		stats.PopulateSARIF(builder)
 		markdownSummary = reporter.GeneratePRSummary(stats)
+
+		// Optional Sticky Comment on PR
+		if flagCommentPR && ghClient != nil && repoSlug != "" && prNumber > 0 {
+			if !flagQuiet {
+				fmt.Printf("💬 Posting sticky comment to PR #%d...\n", prNumber)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			err := ghClient.PostOrUpdatePRComment(ctx, repoSlug, prNumber, "<!-- gh-stats-sticky-comment -->", markdownSummary)
+			cancel()
+			if err != nil && !flagQuiet {
+				fmt.Printf("⚠️ Failed to post PR sticky comment: %v\n", err)
+			}
+		}
 
 		if !flagQuiet {
 			fmt.Printf("✅ PR Analysis Complete: Risk=%s (%d/100), Files=%d, Additions=+%d, Deletions=-%d\n",
@@ -202,6 +219,32 @@ func main() {
 
 	if !flagQuiet && os.Getenv("GITHUB_ACTIONS") == "" {
 		fmt.Println("\n" + markdownSummary)
+	}
+
+	// Quality gate enforcement (fail-on)
+	if target == "pr" && prStats != nil && flagFailOn != "" {
+		prPriority := riskLevelPriority(prStats.RiskLevel)
+		gatePriority := riskLevelPriority(flagFailOn)
+		if gatePriority > 0 && prPriority >= gatePriority {
+			fmt.Fprintf(os.Stderr, "❌ Quality Gate Failed: PR SRE risk level [%s] meets or exceeds fail-on threshold [%s]\n",
+				prStats.RiskLevel, strings.ToUpper(flagFailOn))
+			os.Exit(2)
+		}
+	}
+}
+
+func riskLevelPriority(level string) int {
+	switch strings.ToUpper(strings.TrimSpace(level)) {
+	case "CRITICAL":
+		return 4
+	case "HIGH":
+		return 3
+	case "MEDIUM":
+		return 2
+	case "LOW":
+		return 1
+	default:
+		return 0
 	}
 }
 

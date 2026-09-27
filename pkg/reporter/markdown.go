@@ -33,8 +33,11 @@ func GeneratePRSummary(stats *analyzer.PRStats) string {
 	sb.WriteString("| :--- | :--- |\n")
 	sb.WriteString(fmt.Sprintf("| **Lines Added** | `+%d` |\n", stats.TotalAdditions))
 	sb.WriteString(fmt.Sprintf("| **Lines Deleted** | `-%d` |\n", stats.TotalDeletions))
-	sb.WriteString(fmt.Sprintf("| **Net Churn** | `%+d` |\n", stats.NetChange))
-	sb.WriteString(fmt.Sprintf("| **Files Modified** | `%d` (Code: `%d`, Tests: `%d`, Docs: `%d`) |\n", stats.FilesChanged, stats.CodeFilesCount, stats.TestFilesCount, stats.DocFilesCount))
+	fileBreakdown := fmt.Sprintf("Code: `%d`, Tests: `%d`, Docs: `%d`", stats.CodeFilesCount, stats.TestFilesCount, stats.DocFilesCount)
+	if stats.GeneratedFilesCount > 0 {
+		fileBreakdown = fmt.Sprintf("Code: `%d`, Tests: `%d`, Gen: `%d`, Docs: `%d`", stats.CodeFilesCount, stats.TestFilesCount, stats.GeneratedFilesCount, stats.DocFilesCount)
+	}
+	sb.WriteString(fmt.Sprintf("| **Files Modified** | `%d` (%s) |\n", stats.FilesChanged, fileBreakdown))
 	sb.WriteString(fmt.Sprintf("| **Test vs Code Delta** | `+%d` test lines / `+%d` code lines |\n", stats.TestLinesAdded, stats.CodeLinesAdded))
 	sb.WriteString(fmt.Sprintf("| **Commits** | `%d` |\n", stats.CommitCount))
 

@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   schedule:
     - cron: '0 0 * * 1' # Weekly Monday midnight run
+  workflow_dispatch:   # Manual trigger from GitHub Actions UI
 
 permissions:
   contents: read
@@ -21,7 +22,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run gh-stats
-        uses: smford/gh-stats@main
+        uses: ./
         with:
           target: repo
           commit-limit: '250'
