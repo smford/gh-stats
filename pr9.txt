@@ -1,56 +1,58 @@
-feat: Semantic Version bump recommendation (--suggest-bump)
+feat: Environment Drift & Promotion Audit mode (--target=drift)
 
 ## Summary
-This PR introduces the ability to deterministically recommend the next Semantic Version bump (`--suggest-bump` or `--target=release --suggest-bump`) based on Conventional Commits and file diff deltas across releases and pull requests.
+This PR introduces the Environment Drift & Promotion Audit mode (`--target=drift`), providing teams with automated SRE intelligence and risk evaluation before promoting changes between deployment environments (such as staging to production).
 
-It removes guesswork and custom shell regex from CI/CD delivery pipelines, enabling fully automated, repeatable, and standards-compliant SemVer bumping.
+In continuous delivery workflows, long-lived branch divergence between environments frequently leads to high-risk batch releases, unpromoted database migrations, and deployment failures. With `--target=drift`, `gh-stats` audits ahead/behind commit divergence, unpromoted sensitive infrastructure and schema changes, calculates a promotion deployment risk score (0-100), emits SARIF security findings, exports DORA metrics, and renders rich Markdown step summaries.
 
 ### Key Capabilities
-1. Deterministic Bump Evaluation (`pkg/analyzer`):
-- MAJOR: If any breaking changes (`feat!:`, `fix!:`, `refactor!:`, or `BREAKING CHANGE:` in subject/body) or database schema migrations (`*.sql`, `migrations/`) are detected.
-- MINOR: If new features (`feat:`, `feat(...)`) are present without breaking changes.
-- PATCH: If only bug fixes (`fix:`), performance optimizations (`perf:`), documentation (`docs:`), chores (`chore:`), or test additions are present.
-- NONE: If no commits or file changes are detected across the comparison range.
-2. Next Semantic Version Calculator:
-- Computes next SemVer string based on latest repository release tag (e.g. `v0.4.0` + `MINOR` -> `v0.5.0`, `v0.4.0` + `MAJOR` -> `v1.0.0`, `v0.4.0` + `PATCH` -> `v0.4.1`).
-- Preserves SemVer tag formats (with or without `v` prefix).
-3. GitHub Action Integration (`action.yml`):
-- Added input `suggested-bump: 'true'`.
-- Exposes action outputs: `suggested-bump` (e.g. "minor") and `suggested-version` (e.g. "v0.5.0").
-- Also exposes `version`, `version_number`, `is_new_version`, and `major_tag` for direct plug-and-play usage in release workflows.
-4. Release Workflow Automation (`.github/workflows/release.yml`):
-- Updated `Calculate Semantic Version` step to run `go run ./cmd/gh-stats --target=release --suggest-bump`, replacing custom shell regex with deterministic analysis and emitting SRE readiness directly to `$GITHUB_STEP_SUMMARY`.
-5. Local Git Tag Utilities (`pkg/gitutil`):
-- Added `GetLatestTag()` supporting full SemVer ordering via `git tag -l "v*.*.*" --sort=-v:refname`.
-- Added `IsSemverTag()` helper for tag validation.
-6. Documentation & Step Summary Reporting (`pkg/reporter`, `README.md`):
-- Added `Recommended Bump` metric row in Release Step Summary Markdown table.
-- Added comprehensive section in `README.md` detailing CLI usage, Conventional Commit rules, and GitHub Actions integration.
+1. Environment Drift Audit CLI (`cmd/gh-stats`):
+- Added `--target=drift` mode comparing target base environment (e.g. `--base=origin/production`) with candidate source environment (e.g. `--head=origin/staging`).
+- Automated branch resolution with sensible defaults and remote prefix handling (`origin/production`, `origin/staging`, `HEAD`).
+- Quality gate enforcement with `--fail-on` (e.g. `--fail-on=HIGH` blocks promotion when drift risk exceeds threshold).
+2. Drift Metrics & Risk Engine (`pkg/analyzer`):
+- Commits ahead: unpromoted commits queued in candidate environment waiting for release.
+- Commits behind: upstream divergence / hotfixes on base environment missing from candidate.
+- Unpromoted breaking changes: conventional commits breaking syntax (`feat!:`, `BREAKING CHANGE:`) and schema migrations (`migrations/`, `*.sql`).
+- High blast radius tracking: unpromoted changes to infrastructure, containers, CI/CD pipelines, and auth modules.
+- Promotion Deployment Risk Score (0-100) and qualitative risk tiers (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
+3. Markdown Step Summary Table (`pkg/reporter`):
+- Renders dedicated `🌐 Environment Drift & Promotion Assessment` summary table in `$GITHUB_STEP_SUMMARY`.
+- Highlights base and candidate environments, ahead/behind counts with status indicators, net lines moved, breaking changes, and candidate commit queue.
+- Shows in-sync confirmation banner when environments have zero divergence.
+4. DORA & Observability Telemetry Export (`pkg/exporter`):
+- Added `DriftMetrics` struct and `NewDriftPayload` constructor.
+- Exports structured drift telemetry into DORA payloads for JSON logging or webhook dispatch.
+5. SARIF Security & Reliability Rules (`pkg/analyzer`):
+- `GHSTATS301-DRIFT-SUMMARY`: Environment drift and promotion audit summary (`note`).
+- `GHSTATS302-DRIFT-EXCESSIVE`: Excessive commit divergence detected between deployment environments (`warning`).
+- `GHSTATS303-DRIFT-UNPROMOTED-BREAKING`: Unpromoted breaking changes or database schema migrations waiting between environments (`warning`).
+- `GHSTATS304-DRIFT-UNPROMOTED-SENSITIVE`: Unpromoted critical infrastructure, CI/CD pipeline, or security configuration changes (`warning`).
+6. GitHub Action Integration (`action.yml`):
+- Added `drift` to target options.
+- Exposes step outputs: `drift-base-ref`, `drift-head-ref`, `drift-commits-ahead`, `drift-commits-behind`, `drift-breaking-count`, `drift-sensitive-count`, `drift-risk-level`, and `drift-risk-score`.
+7. Testing & Verification:
+- Added `GetAheadBehind` runner method and synthetic test cases in `pkg/gitutil`.
+- Added synthetic branch drift test cases in `pkg/analyzer/drift_test.go` covering clean sync, breaking changes, migrations, and excessive divergence.
+- Added reporter tests in `pkg/reporter/markdown_test.go`.
+- Added exporter tests in `pkg/exporter/exporter_test.go`.
 
 ## Changes
-- `pkg/analyzer/semver.go`: Created `CalculateNextVersion()`, `(ReleaseStats).DetermineBump()`, and `(PRStats).DetermineBump()`.
-- `pkg/analyzer/semver_test.go`: Added comprehensive unit and synthetic tests covering major/minor/patch/none bumps, tag calculation, and git repo integration.
-- `pkg/analyzer/release.go`: Added `SuggestedBump` and `SuggestedVersion` fields to `ReleaseStats`, automatically populating them in `AnalyzeRelease()`.
-- `pkg/analyzer/pr.go`: Added `SuggestedBump` and `SuggestedVersion` fields to `PRStats`, automatically populating them in `AnalyzePR()`.
-- `pkg/analyzer/analyzer.go`: Updated Database Migrations sensitive pattern to match `*.sql` files generally.
-- `pkg/gitutil/git.go`: Added `GetLatestTag()` and `IsSemverTag()`.
-- `pkg/gitutil/git_test.go`: Added tests for `GetLatestTag()`, `IsSemverTag()`, and synthetic SemVer tag ordering.
-- `pkg/reporter/markdown.go`: Added `Recommended Bump` row to Release Delta Overview summary table.
-- `cmd/gh-stats/main.go`: Added `--suggest-bump` CLI flag, automated release target defaulting, and exposed GitHub Action outputs.
-- `action.yml`: Declared `suggested-bump` input and `suggested-bump` / `suggested-version` outputs.
-- `.github/workflows/release.yml`: Updated `Calculate Semantic Version` step to run `gh-stats --target=release --suggest-bump`.
-- `scripts/bump-version.sh`: Updated breaking change regex to check SQL migration files.
-- `README.md`: Documented `--suggest-bump` flag, action outputs, and workflow examples.
+- `cmd/gh-stats/main.go`: Added `drift` target mode, flag handling, drift outputs, DORA drift export, and fail-on gate.
+- `pkg/gitutil/git.go`: Added `GetAheadBehind()` using `git rev-list --left-right --count`.
+- `pkg/gitutil/git_test.go`: Added `TestGetAheadBehind` unit test.
+- `pkg/analyzer/analyzer.go`: Added SARIF rules `GHSTATS301` through `GHSTATS304`.
+- `pkg/analyzer/drift.go`: Added `DriftStats`, `AnalyzeDrift()`, `CalculateRisk()`, and `PopulateSARIF()`.
+- `pkg/analyzer/drift_test.go`: Added synthetic branch drift tests and excessive divergence tests.
+- `pkg/reporter/markdown.go`: Added `GenerateDriftSummary()` and `formatDriftStatus()`.
+- `pkg/reporter/markdown_test.go`: Added `TestGenerateDriftSummary` covering drift and in-sync states.
+- `pkg/exporter/exporter.go`: Added `DriftMetrics` and `NewDriftPayload()`.
+- `pkg/exporter/exporter_test.go`: Added `TestNewDriftPayload`.
+- `action.yml`: Documented `drift` target and added `drift-*` step outputs.
+- `README.md`: Documented Environment Drift & Promotion Audit with workflow examples, CLI flags, outputs, and SARIF rules.
 
 ## Verification
-- `go test -count=1 -race ./...` (All tests passed cleanly with 0 race conditions)
+- `go test -count=1 -race ./...` (All tests passed, 0 race conditions)
 - `go vet ./...` (Clean, 0 warnings)
 - `shellcheck scripts/*.sh examples/hooks/*` (Clean, 0 errors)
-- CLI execution test:
-```text
-$ gh-stats --suggest-bump
-🔍 gh-stats: running in [RELEASE] mode
-📦 Comparing Release: v0.5.0 ... HEAD
-✅ Release Analysis Complete: Risk=MEDIUM (40/100), Commits=5, Breaking Changes=0, Files=8
-🏷️ Suggested Version Bump: MINOR (current: v0.5.0 ➔ next: v0.6.0)
-```
+- CLI manual execution: verified `--target=drift` with `--base=main --head=HEAD`.

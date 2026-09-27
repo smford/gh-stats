@@ -312,6 +312,106 @@ func GenerateReleaseSummary(stats *analyzer.ReleaseStats) string {
 	return sb.String()
 }
 
+// GenerateDriftSummary generates a GitHub Step Summary Markdown string for environment drift and promotion assessment.
+func GenerateDriftSummary(stats *analyzer.DriftStats) string {
+	var sb strings.Builder
+	sb.WriteString("# 🌐 Environment Drift & Promotion Assessment\n\n")
+
+	sb.WriteString(fmt.Sprintf("> **Promotion Deployment Risk:** `%s` (Score: **%d / 100**) 🛡️\n\n", stats.RiskLevel, stats.RiskScore))
+
+	sb.WriteString("## 🌐 Environment Drift & Promotion Assessment\n\n")
+	sb.WriteString("| Metric | Target / Environment | Status |\n")
+	sb.WriteString("| :--- | :--- | :--- |\n")
+	sb.WriteString(fmt.Sprintf("| **Base Environment (Target)** | `%s` | Target Base |\n", stats.BaseRef))
+	sb.WriteString(fmt.Sprintf("| **Head Environment (Candidate)** | `%s` | Promotion Source |\n", stats.HeadRef))
+	sb.WriteString(fmt.Sprintf("| **Commits Ahead (Unpromoted)** | `%d` commit(s) awaiting promotion | %s |\n", stats.CommitsAhead, formatDriftStatus(stats.CommitsAhead, 15)))
+	sb.WriteString(fmt.Sprintf("| **Commits Behind (Divergence)** | `%d` commit(s) missing from candidate | %s |\n", stats.CommitsBehind, formatDriftStatus(stats.CommitsBehind, 5)))
+	sb.WriteString(fmt.Sprintf("| **Lines Added** | `+%d` | Unpromoted delta |\n", stats.TotalAdditions))
+	sb.WriteString(fmt.Sprintf("| **Lines Deleted** | `-%d` | Unpromoted delta |\n", stats.TotalDeletions))
+	sb.WriteString(fmt.Sprintf("| **Net Change** | `%+d` lines | Net code movement |\n", stats.NetChange))
+
+	fileBreakdown := fmt.Sprintf("Code: `%d`, Tests: `%d`, Docs: `%d`", stats.CodeFilesCount, stats.TestFilesCount, stats.DocFilesCount)
+	if stats.GeneratedFilesCount > 0 {
+		fileBreakdown = fmt.Sprintf("Code: `%d`, Tests: `%d`, Gen: `%d`, Docs: `%d`", stats.CodeFilesCount, stats.TestFilesCount, stats.GeneratedFilesCount, stats.DocFilesCount)
+	}
+	sb.WriteString(fmt.Sprintf("| **Files Modified** | `%d` (%s) | Unpromoted files |\n", stats.FilesChanged, fileBreakdown))
+
+	if stats.CommitsAhead == 0 && stats.CommitsBehind == 0 && stats.FilesChanged == 0 {
+		sb.WriteString("\n> ✅ **Environments are in sync!** No unpromoted commits or environment drift detected between `" + stats.BaseRef + "` and `" + stats.HeadRef + "`.\n")
+	}
+
+	// Unpromoted Breaking Changes
+	if len(stats.BreakingChanges) > 0 {
+		sb.WriteString("\n## ⚠️ Unpromoted Breaking Changes & Migrations\n\n")
+		sb.WriteString("| Commit / Item | Description | Type |\n")
+		sb.WriteString("| :--- | :--- | :--- |\n")
+		for _, bc := range stats.BreakingChanges {
+			ref := bc.CommitHash
+			if ref == "" {
+				ref = "Schema"
+			} else {
+				ref = fmt.Sprintf("`%s`", ref)
+			}
+			sb.WriteString(fmt.Sprintf("| %s | %s | `%s` |\n", ref, bc.Subject, bc.Reason))
+		}
+	}
+
+	// Unpromoted Sensitive Files
+	if len(stats.SensitiveFiles) > 0 {
+		sb.WriteString("\n## 🛡️ Unpromoted High Blast Radius Files\n\n")
+		sb.WriteString("| Path | Category | Delta |\n")
+		sb.WriteString("| :--- | :--- | :--- |\n")
+		for _, sf := range stats.SensitiveFiles {
+			sb.WriteString(fmt.Sprintf("| `%s` | %s | `+%d / -%d` |\n", sf.Path, sf.Category, sf.Additions, sf.Deletions))
+		}
+	}
+
+	// Top Unpromoted Changed Files
+	if len(stats.TopChangedFiles) > 0 {
+		sb.WriteString("\n## 📁 Top Unpromoted Modified Files\n\n")
+		sb.WriteString("| File | Additions | Deletions | Net |\n")
+		sb.WriteString("| :--- | :---: | :---: | :---: |\n")
+		limit := len(stats.TopChangedFiles)
+		if limit > 7 {
+			limit = 7
+		}
+		for i := 0; i < limit; i++ {
+			f := stats.TopChangedFiles[i]
+			sb.WriteString(fmt.Sprintf("| `%s` | `+%d` | `-%d` | `%+d` |\n", f.Path, f.Additions, f.Deletions, f.Additions-f.Deletions))
+		}
+	}
+
+	// Unpromoted Commits (up to 10)
+	if len(stats.UnpromotedCommits) > 0 {
+		sb.WriteString("\n## 📋 Unpromoted Commits (Candidate Queue)\n\n")
+		sb.WriteString("| Commit | Author | Subject |\n")
+		sb.WriteString("| :--- | :--- | :--- |\n")
+		limit := len(stats.UnpromotedCommits)
+		if limit > 10 {
+			limit = 10
+		}
+		for i := 0; i < limit; i++ {
+			c := stats.UnpromotedCommits[i]
+			sb.WriteString(fmt.Sprintf("| `%s` | @%s | %s |\n", c.Hash, c.Author, c.Subject))
+		}
+		if len(stats.UnpromotedCommits) > 10 {
+			sb.WriteString(fmt.Sprintf("\n*...and %d more unpromoted commit(s)*\n", len(stats.UnpromotedCommits)-10))
+		}
+	}
+
+	return sb.String()
+}
+
+func formatDriftStatus(count, warnThreshold int) string {
+	if count == 0 {
+		return "✅ In Sync"
+	}
+	if count >= warnThreshold {
+		return "⚠️ High Drift"
+	}
+	return "ℹ️ Pending Promotion"
+}
+
 
 // WriteStepSummary writes the markdown summary to GITHUB_STEP_SUMMARY if available.
 func WriteStepSummary(summary string) error {

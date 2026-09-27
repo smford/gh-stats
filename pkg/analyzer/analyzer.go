@@ -374,5 +374,69 @@ var (
 		},
 		DefaultConfiguration: &sarif.RuleConfiguration{Level: "warning"},
 	}
+
+	RuleDriftSummary = sarif.Rule{
+		ID:   "GHSTATS301-DRIFT-SUMMARY",
+		Name: "EnvironmentDriftSummary",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "Environment drift and promotion audit summary",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "Audits commit divergence, ahead/behind counts, unpromoted code volume, and deployment risk between deployment environments.",
+		},
+		Help: &sarif.MultiformatMessage{
+			Text:     "Regularly promote changes across environments to prevent long-lived branch divergence and release queue pileups.",
+			Markdown: "### Environment Drift Guidance\n- **Continuous Promotion**: Keep staging and production closely synchronized to minimize batch release risks.\n- **Back-merging**: Ensure production hotfixes are back-merged into lower environments promptly.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "note"},
+	}
+
+	RuleDriftExcessive = sarif.Rule{
+		ID:   "GHSTATS302-DRIFT-EXCESSIVE",
+		Name: "ExcessiveEnvironmentDrift",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "Excessive commit divergence detected between deployment environments",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "The number of unpromoted commits ahead or diverged commits behind between environments exceeds safe promotion thresholds, drastically elevating batch deployment failure risk.",
+		},
+		Help: &sarif.MultiformatMessage{
+			Text:     "Promote queued commits in smaller increments or rebase/back-merge divergent commits to restore environment parity.",
+			Markdown: "### Excessive Drift SRE Guidance\n- **Batch Size Risk**: Large promotion batches multiply deployment failure rates and make incident root cause identification significantly harder.\n- **Action**: Schedule immediate deployment or sync window to resolve environment drift.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "warning"},
+	}
+
+	RuleDriftUnpromotedBreaking = sarif.Rule{
+		ID:   "GHSTATS303-DRIFT-UNPROMOTED-BREAKING",
+		Name: "UnpromotedBreakingChangesDetected",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "Unpromoted breaking changes or database schema migrations waiting between environments",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "Candidate environment contains unpromoted breaking changes or database schema migrations that alter backwards compatibility and require careful rollout sequencing.",
+		},
+		Help: &sarif.MultiformatMessage{
+			Text:     "Verify data migration safety, expand-contract patterns, and consumer compatibility before promoting to target environment.",
+			Markdown: "### Promotion Safety Guidance\n- **Database Migrations**: Pre-run migration compatibility checks and verify backup/restore procedures.\n- **Contract Breaches**: Ensure dependent downstream services have already adapted to contract alterations.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "warning"},
+	}
+
+	RuleDriftSensitive = sarif.Rule{
+		ID:   "GHSTATS304-DRIFT-UNPROMOTED-SENSITIVE",
+		Name: "UnpromotedSensitiveFilesDetected",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "Unpromoted critical infrastructure, CI/CD pipeline, or security configuration changes",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "Candidate environment contains unpromoted modifications to high blast radius files including infrastructure manifests, container definitions, CI/CD workflows, or authentication modules.",
+		},
+		Help: &sarif.MultiformatMessage{
+			Text:     "Ensure infrastructure and platform engineering approvals are obtained before promoting changes to production.",
+			Markdown: "### Sensitive Promotion Review\n- **Platform Sign-off**: Verify cloud provisioning and IAM changes have verified rollback plans.\n- **Pipeline Validation**: Verify CI/CD pipeline modifications do not disrupt downstream release triggers.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "warning"},
+	}
 )
 

@@ -140,15 +140,15 @@ jobs:
 
 | Input | Description | Default | Required |
 | :--- | :--- | :---: | :---: |
-| `target` | Analysis mode: `'pr'`, `'repo'`, `'release'`, `'range'`, or `'auto'` (auto-detects based on event) | `'auto'` | No |
-| `base-ref` | Base git reference for PR or release comparison (defaults to auto-detected previous tag in release mode, or base branch in PR mode) | `github.base_ref` | No |
-| `head-ref` | Head git reference for PR or release comparison (defaults to HEAD or latest tag) | `HEAD` | No |
+| `target` | Analysis mode: `'pr'`, `'repo'`, `'release'`, `'range'`, `'drift'`, or `'auto'` (auto-detects based on event) | `'auto'` | No |
+| `base-ref` | Base git reference for PR, release, or drift comparison (defaults to auto-detected previous tag in release mode, base branch in PR mode, or production branch in drift mode) | `github.base_ref` | No |
+| `head-ref` | Head git reference for PR, release, or drift comparison (defaults to HEAD, latest tag in release mode, or staging branch in drift mode) | `HEAD` | No |
 | `output` | Destination file path for generated SARIF report | `gh-stats.sarif` | No |
 | `commit-limit` | Maximum commit history to analyze in `repo` mode | `200` | No |
 | `upload-sarif` | Automatically upload SARIF to GitHub Code Scanning via `@actions/upload-sarif` | `'true'` | No |
 | `category` | SARIF category label in GitHub Code Scanning | `gh-stats` | No |
 | `comment-pr` | Post or update a live sticky Markdown summary comment on the PR conversation thread | `'false'` | No |
-| `fail-on` | Enforce risk budget gating: fail job if PR or release risk meets/exceeds threshold (`'CRITICAL'`, `'HIGH'`, `'MEDIUM'`, `'LOW'`) | `''` (disabled) | No |
+| `fail-on` | Enforce risk budget gating: fail job if PR, release, or drift risk meets/exceeds threshold (`'CRITICAL'`, `'HIGH'`, `'MEDIUM'`, `'LOW'`) | `''` (disabled) | No |
 | `config-path` | Path to `.gh-stats.yml` configuration file (auto-discovers `.gh-stats.yml` or `.github/.gh-stats.yml` if omitted) | `''` | No |
 | `export-json` | File path to export structured DORA & SRE metrics in JSON format | `''` (disabled) | No |
 | `export-webhook` | HTTP/HTTPS Webhook endpoint to dispatch DORA & SRE metrics payload | `''` (disabled) | No |
@@ -167,7 +167,15 @@ jobs:
 | `release-breaking-count` | Number of breaking changes and database migrations detected in the release |
 | `release-risk-level` | Evaluated deployment risk rating (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) |
 | `release-risk-score` | Numerical deployment risk score (0-100) |
-| `target` | Resolved analysis target (`pr`, `repo`, or `release`) |
+| `drift-base-ref` | Target environment reference evaluated in drift mode |
+| `drift-head-ref` | Candidate environment reference evaluated in drift mode |
+| `drift-commits-ahead` | Number of unpromoted commits in candidate environment awaiting promotion |
+| `drift-commits-behind` | Number of diverged/missing upstream commits in candidate environment |
+| `drift-breaking-count` | Number of unpromoted breaking changes or schema migrations detected |
+| `drift-sensitive-count` | Number of unpromoted sensitive infrastructure, CI/CD, or security files |
+| `drift-risk-level` | Evaluated promotion deployment risk rating (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) |
+| `drift-risk-score` | Numerical promotion deployment risk score (0-100) |
+| `target` | Resolved analysis target (`pr`, `repo`, `release`, or `drift`) |
 
 ---
 
@@ -191,6 +199,10 @@ jobs:
 | `GHSTATS201-RELEASE-SUMMARY` | `note` | Release | Release comparison delta, velocity, breaking change count, and readiness summary |
 | `GHSTATS202-RELEASE-BREAKING` | `warning` | Release | Breaking change syntax (`!:`, `BREAKING CHANGE:`) or database schema migrations detected |
 | `GHSTATS203-RELEASE-BLAST-RADIUS` | `warning` | Release | High-blast-radius infrastructure, CI/CD, or auth files modified in release |
+| `GHSTATS301-DRIFT-SUMMARY` | `note` | Drift | Environment drift and promotion audit summary, ahead/behind counts, and unpromoted volume |
+| `GHSTATS302-DRIFT-EXCESSIVE` | `warning` | Drift | Excessive commit divergence detected between deployment environments (batch promotion risk) |
+| `GHSTATS303-DRIFT-UNPROMOTED-BREAKING` | `warning` | Drift | Unpromoted breaking changes or database schema migrations waiting between environments |
+| `GHSTATS304-DRIFT-UNPROMOTED-SENSITIVE` | `warning` | Drift | Unpromoted critical infrastructure, CI/CD pipeline, or security configuration changes |
 
 ---
 
@@ -444,6 +456,109 @@ Output:
 | `suggested-bump` | Recommended SemVer bump (`major`, `minor`, `patch`, or `none`) | `minor` |
 | `suggested-version` | Next calculated SemVer release tag | `v0.5.0` |
 
+## 🌐 Environment Drift & Promotion Audit (`--target=drift`)
+
+In continuous delivery architectures with multiple deployment tiers (e.g. `staging` ➔ `production`, or `dev` ➔ `qa`), long-lived branch divergence leads to high-risk batch promotions, unpromoted database migrations, and release pipeline failures.
+
+`gh-stats` provides **Environment Drift & Promotion Audit Mode** (`--target=drift`) to quantify deployment readiness and risk between environments before triggering a promotion:
+
+- **Divergence Velocity (Commits Ahead & Behind):**
+  - Evaluates how many commits candidate environment is **ahead** of target base (unpromoted commits queued for release).
+  - Evaluates how many commits candidate environment is **behind** target base (upstream divergence or emergency production hotfixes not yet back-merged).
+- **Unpromoted Blast Radius & Breaking Changes:**
+  - Flags unpromoted database schema migrations (`migrations/`, `*.sql`).
+  - Pinpoints unpromoted infrastructure, container, security, or CI/CD workflow alterations.
+  - Detects unpromoted breaking changes from Conventional Commits (`feat!:`, `BREAKING CHANGE:`).
+- **Promotion Deployment Risk Score (0-100):**
+  - Computes a deterministic SRE risk score and qualitative risk tier (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
+  - Enforces automated quality gating via `--fail-on=HIGH` or `--fail-on=CRITICAL` to halt risky promotions.
+- **DORA & Observability Export:**
+  - Emits telemetry with commit divergence and sensitive change counts for DORA dashboards.
+
+### Sample Step Summary Table:
+
+```markdown
+# 🌐 Environment Drift & Promotion Assessment
+
+> **Promotion Deployment Risk:** `HIGH` (Score: **65 / 100**) 🛡️
+
+## 🌐 Environment Drift & Promotion Assessment
+
+| Metric | Target / Environment | Status |
+| :--- | :--- | :--- |
+| **Base Environment (Target)** | `origin/production` | Target Base |
+| **Head Environment (Candidate)** | `origin/staging` | Promotion Source |
+| **Commits Ahead (Unpromoted)** | `8` commit(s) awaiting promotion | ℹ️ Pending Promotion |
+| **Commits Behind (Divergence)** | `2` commit(s) missing from candidate | ℹ️ Pending Promotion |
+| **Lines Added** | `+450` | Unpromoted delta |
+| **Lines Deleted** | `-30` | Unpromoted delta |
+| **Net Change** | `+420` lines | Net code movement |
+| **Files Modified** | `6` (Code: `4`, Tests: `1`, Docs: `1`) | Unpromoted files |
+
+## ⚠️ Unpromoted Breaking Changes & Migrations
+
+| Commit / Item | Description | Type |
+| :--- | :--- | :--- |
+| `c0ffee1` | feat!: breaking API v2 overhaul | `conventional_commit` |
+| Schema | Database Migration: migrations/002_orders.sql (+30/-0) | `migration_file` |
+```
+
+### GitHub Actions Promotion Audit Workflow (`.github/workflows/environment-drift.yml`)
+
+Run before promoting `staging` to `production` or on a scheduled audit cron:
+
+```yaml
+name: Environment Drift & Promotion Audit
+
+on:
+  schedule:
+    - cron: '0 8 * * 1-5' # Weekday morning audit at 8 AM UTC
+  workflow_dispatch:
+    inputs:
+      base_env:
+        description: 'Target promotion environment branch'
+        required: true
+        default: 'origin/production'
+      candidate_env:
+        description: 'Candidate environment branch to promote'
+        required: true
+        default: 'origin/staging'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  audit-drift:
+    name: Audit Environment Parity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history required for ahead/behind calculation
+
+      - name: Run gh-stats Drift Audit
+        uses: smford/gh-stats@main
+        with:
+          target: drift
+          base-ref: ${{ inputs.base_env || 'origin/production' }}
+          head-ref: ${{ inputs.candidate_env || 'origin/staging' }}
+          fail-on: 'HIGH' # Blocks promotion if drift risk is HIGH or CRITICAL
+          output: drift-audit.sarif
+          export-json: drift-metrics.json
+```
+
+### CLI Usage:
+
+```bash
+# Audit drift between production and staging
+gh-stats --target=drift --base=origin/production --head=origin/staging
+
+# Audit drift with strict quality gate
+gh-stats --target=drift --base=origin/production --head=origin/staging --fail-on=HIGH
+```
+
 ---
 
 ## 💻 Local CLI Usage
@@ -485,11 +600,11 @@ gh-stats -version
 ### CLI Flags:
 ```text
   -target string
-        Target scope: 'pr', 'repo', 'release'/'range', or 'auto' (default "auto")
+        Target scope: 'pr', 'repo', 'release'/'range', 'drift', or 'auto' (default "auto")
   -base string
-        Base ref for PR or release comparison (e.g. origin/main or v0.3.0)
+        Base ref for PR, release, or drift comparison (e.g. origin/main, v0.3.0, or origin/production)
   -head string
-        Head ref for PR or release comparison (default "HEAD")
+        Head ref for PR, release, or drift comparison (default "HEAD")
   -config string
         Path to .gh-stats.yml configuration file
   -output string
@@ -499,7 +614,7 @@ gh-stats -version
   -commit-limit int
         Maximum commit history to examine for repo hotspots (default 200)
   -fail-on string
-        Fail workflow if PR or release risk meets/exceeds threshold (e.g. 'HIGH', 'CRITICAL')
+        Fail workflow if PR, release, or drift risk meets/exceeds threshold (e.g. 'HIGH', 'CRITICAL')
   -comment-pr
         Post or update a sticky summary comment on the PR
   -export-json string

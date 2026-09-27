@@ -7,15 +7,15 @@ branding:
 
 inputs:
   target:
-    description: 'Target scope to analyze: "pr", "repo", "release", "range", or "auto" (auto detects based on event)'
+    description: 'Target scope to analyze: "pr", "repo", "release", "range", "drift", or "auto" (auto detects based on event)'
     required: false
     default: 'auto'
   base-ref:
-    description: 'Base git reference for PR or release comparison (defaults to auto-detected previous tag in release mode, or base branch in PR mode)'
+    description: 'Base git reference for PR, release, or drift comparison (defaults to auto-detected previous tag in release mode, base branch in PR mode, or production branch in drift mode)'
     required: false
     default: ''
   head-ref:
-    description: 'Head git reference for PR or release comparison (defaults to HEAD or latest tag in release mode)'
+    description: 'Head git reference for PR, release, or drift comparison (defaults to HEAD, latest tag in release mode, or staging branch in drift mode)'
     required: false
     default: 'HEAD'
   output:
@@ -106,6 +106,30 @@ outputs:
   release-risk-score:
     description: 'Calculated deployment risk score for the release (0-100)'
     value: ${{ steps.run-stats.outputs.release-risk-score }}
+  drift-base-ref:
+    description: 'Base environment/branch used for drift comparison'
+    value: ${{ steps.run-stats.outputs.drift-base-ref }}
+  drift-head-ref:
+    description: 'Head environment/branch used for drift comparison'
+    value: ${{ steps.run-stats.outputs.drift-head-ref }}
+  drift-commits-ahead:
+    description: 'Number of unpromoted commits in the candidate environment ahead of target'
+    value: ${{ steps.run-stats.outputs.drift-commits-ahead }}
+  drift-commits-behind:
+    description: 'Number of upstream commits missing from candidate environment behind target'
+    value: ${{ steps.run-stats.outputs.drift-commits-behind }}
+  drift-breaking-count:
+    description: 'Number of unpromoted breaking changes or schema migrations detected'
+    value: ${{ steps.run-stats.outputs.drift-breaking-count }}
+  drift-sensitive-count:
+    description: 'Number of unpromoted sensitive infrastructure, CI/CD, or security files modified'
+    value: ${{ steps.run-stats.outputs.drift-sensitive-count }}
+  drift-risk-level:
+    description: 'Calculated promotion deployment risk level ("LOW", "MEDIUM", "HIGH", "CRITICAL")'
+    value: ${{ steps.run-stats.outputs.drift-risk-level }}
+  drift-risk-score:
+    description: 'Calculated promotion deployment risk score (0-100)'
+    value: ${{ steps.run-stats.outputs.drift-risk-score }}
   suggested-bump:
     description: 'Recommended Semantic Version bump type ("major", "minor", "patch")'
     value: ${{ steps.run-stats.outputs.suggested-bump }}

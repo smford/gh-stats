@@ -20,12 +20,31 @@ import (
 type DORAMetricsPayload struct {
 	SchemaVersion string          `json:"schemaVersion"`
 	Timestamp     time.Time       `json:"timestamp"`
-	Target        string          `json:"target"` // "pr", "repo", or "release"
+	Target        string          `json:"target"` // "pr", "repo", "release", or "drift"
 	Repository    string          `json:"repository"`
 	Ref           string          `json:"ref,omitempty"`
 	PR            *PRMetrics      `json:"pr,omitempty"`
 	Repo          *RepoMetrics    `json:"repo,omitempty"`
 	Release       *ReleaseMetrics `json:"release,omitempty"`
+	Drift         *DriftMetrics   `json:"drift,omitempty"`
+}
+
+// DriftMetrics encapsulates environment drift, commits ahead/behind, unpromoted blast radius, and promotion risk.
+type DriftMetrics struct {
+	BaseRef              string   `json:"baseRef"`
+	HeadRef              string   `json:"headRef"`
+	RiskScore            int      `json:"riskScore"`
+	RiskLevel            string   `json:"riskLevel"`
+	CommitsAhead         int      `json:"commitsAhead"`
+	CommitsBehind        int      `json:"commitsBehind"`
+	TotalAdditions       int      `json:"totalAdditions"`
+	TotalDeletions       int      `json:"totalDeletions"`
+	NetChange            int      `json:"netChange"`
+	FilesChanged         int      `json:"filesChanged"`
+	BreakingChangesCount int      `json:"breakingChangesCount"`
+	BreakingChanges      []string `json:"breakingChanges,omitempty"`
+	SensitiveFilesCount  int      `json:"sensitiveFilesCount"`
+	SensitiveCategories  []string `json:"sensitiveCategories"`
 }
 
 // ReleaseMetrics encapsulates release comparison delta, commit volume, breaking changes, and risk.
@@ -248,6 +267,49 @@ func NewReleasePayload(stats *analyzer.ReleaseStats, repoSlug string) *DORAMetri
 		Repository:    repoSlug,
 		Ref:           stats.HeadRef,
 		Release:       relMetrics,
+	}
+}
+
+// NewDriftPayload constructs a DORAMetricsPayload from DriftStats.
+func NewDriftPayload(stats *analyzer.DriftStats, repoSlug string) *DORAMetricsPayload {
+	var categories []string
+	catSet := make(map[string]bool)
+	for _, sf := range stats.SensitiveFiles {
+		if !catSet[sf.Category] {
+			catSet[sf.Category] = true
+			categories = append(categories, sf.Category)
+		}
+	}
+
+	var breakingList []string
+	for _, bc := range stats.BreakingChanges {
+		breakingList = append(breakingList, bc.Subject)
+	}
+
+	driftMetrics := &DriftMetrics{
+		BaseRef:              stats.BaseRef,
+		HeadRef:              stats.HeadRef,
+		RiskScore:            stats.RiskScore,
+		RiskLevel:            stats.RiskLevel,
+		CommitsAhead:         stats.CommitsAhead,
+		CommitsBehind:        stats.CommitsBehind,
+		TotalAdditions:       stats.TotalAdditions,
+		TotalDeletions:       stats.TotalDeletions,
+		NetChange:            stats.NetChange,
+		FilesChanged:         stats.FilesChanged,
+		BreakingChangesCount: len(stats.BreakingChanges),
+		BreakingChanges:      breakingList,
+		SensitiveFilesCount:  len(stats.SensitiveFiles),
+		SensitiveCategories:  categories,
+	}
+
+	return &DORAMetricsPayload{
+		SchemaVersion: "1.0.0",
+		Timestamp:     time.Now().UTC(),
+		Target:        "drift",
+		Repository:    repoSlug,
+		Ref:           stats.HeadRef,
+		Drift:         driftMetrics,
 	}
 }
 
