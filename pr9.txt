@@ -28,14 +28,12 @@ In continuous delivery workflows, long-lived branch divergence between environme
 - `GHSTATS302-DRIFT-EXCESSIVE`: Excessive commit divergence detected between deployment environments (`warning`).
 - `GHSTATS303-DRIFT-UNPROMOTED-BREAKING`: Unpromoted breaking changes or database schema migrations waiting between environments (`warning`).
 - `GHSTATS304-DRIFT-UNPROMOTED-SENSITIVE`: Unpromoted critical infrastructure, CI/CD pipeline, or security configuration changes (`warning`).
-6. GitHub Action Integration (`action.yml`):
+6. Demonstration Workflow & Synthetic Testing:
+- Added `.github/workflows/test-environment-drift.yml` for manual dispatch (`workflow_dispatch`) with configurable base and head environments.
+- Added end-to-end multi-tier synthetic drift test script `scripts/test-synthetic-drift.sh`.
+7. GitHub Action Integration (`action.yml`):
 - Added `drift` to target options.
 - Exposes step outputs: `drift-base-ref`, `drift-head-ref`, `drift-commits-ahead`, `drift-commits-behind`, `drift-breaking-count`, `drift-sensitive-count`, `drift-risk-level`, and `drift-risk-score`.
-7. Testing & Verification:
-- Added `GetAheadBehind` runner method and synthetic test cases in `pkg/gitutil`.
-- Added synthetic branch drift test cases in `pkg/analyzer/drift_test.go` covering clean sync, breaking changes, migrations, and excessive divergence.
-- Added reporter tests in `pkg/reporter/markdown_test.go`.
-- Added exporter tests in `pkg/exporter/exporter_test.go`.
 
 ## Changes
 - `cmd/gh-stats/main.go`: Added `drift` target mode, flag handling, drift outputs, DORA drift export, and fail-on gate.
@@ -48,6 +46,8 @@ In continuous delivery workflows, long-lived branch divergence between environme
 - `pkg/reporter/markdown_test.go`: Added `TestGenerateDriftSummary` covering drift and in-sync states.
 - `pkg/exporter/exporter.go`: Added `DriftMetrics` and `NewDriftPayload()`.
 - `pkg/exporter/exporter_test.go`: Added `TestNewDriftPayload`.
+- `scripts/test-synthetic-drift.sh`: Created end-to-end multi-tier synthetic drift test suite.
+- `.github/workflows/test-environment-drift.yml`: Created manual demonstration workflow.
 - `action.yml`: Documented `drift` target and added `drift-*` step outputs.
 - `README.md`: Documented Environment Drift & Promotion Audit with workflow examples, CLI flags, outputs, and SARIF rules.
 
@@ -55,4 +55,5 @@ In continuous delivery workflows, long-lived branch divergence between environme
 - `go test -count=1 -race ./...` (All tests passed, 0 race conditions)
 - `go vet ./...` (Clean, 0 warnings)
 - `shellcheck scripts/*.sh examples/hooks/*` (Clean, 0 errors)
+- `./scripts/test-synthetic-drift.sh` (All 3 phases passed successfully)
 - CLI manual execution: verified `--target=drift` with `--base=main --head=HEAD`.
