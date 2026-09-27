@@ -30,6 +30,18 @@ func TestGeneratePRSummary(t *testing.T) {
 	if !strings.Contains(summary, "+120") {
 		t.Errorf("expected additions in summary, got: %s", summary)
 	}
+
+	// With recommended reviewers
+	stats.RecommendedReviewers = []analyzer.ReviewerRecommendation{
+		{Author: "Alice", CommitCount: 12, TopFiles: []string{"pkg/auth/token.go"}},
+	}
+	summaryWithReviewers := GeneratePRSummary(stats)
+	if !strings.Contains(summaryWithReviewers, "Suggested Reviewers") {
+		t.Errorf("expected Suggested Reviewers section, got: %s", summaryWithReviewers)
+	}
+	if !strings.Contains(summaryWithReviewers, "Alice") {
+		t.Errorf("expected Alice in reviewers table, got: %s", summaryWithReviewers)
+	}
 }
 
 func TestGenerateRepoSummary(t *testing.T) {

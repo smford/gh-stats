@@ -216,6 +216,27 @@ func (r *Runner) GetAuthorStats(commitLimit int) (map[string]int, error) {
 	return counts, nil
 }
 
+// GetFileAuthors returns the author commit frequency for a specific file.
+func (r *Runner) GetFileAuthors(filePath string, commitLimit int) (map[string]int, error) {
+	if commitLimit <= 0 {
+		commitLimit = 50
+	}
+	out, err := r.Exec("log", "--follow", fmt.Sprintf("-n%d", commitLimit), "--format=%an", "--", filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	counts := make(map[string]int)
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		author := strings.TrimSpace(line)
+		if author != "" {
+			counts[author]++
+		}
+	}
+	return counts, nil
+}
+
 // ListTrackedFiles returns all tracked files in the repo.
 func (r *Runner) ListTrackedFiles() ([]string, error) {
 	out, err := r.Exec("ls-files")

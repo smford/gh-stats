@@ -258,4 +258,16 @@ var (
 		},
 		DefaultConfiguration: &sarif.RuleConfiguration{Level: "note"},
 	}
+
+	RulePRReviewers = sarif.Rule{
+		ID:   "GHSTATS007-PR-REVIEWERS",
+		Name: "RecommendedDomainReviewers",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "Domain expert reviewers recommended based on historical commit patterns",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "Routing PRs to engineers with demonstrated context on the modified components reduces production outages and speeds up code reviews.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "note"},
+	}
 )

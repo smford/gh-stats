@@ -165,3 +165,39 @@ func TestPRStatsWithGitHubMetadata(t *testing.T) {
 		t.Errorf("expected %s in results for PR with >15 discussions", RulePRDiscussionChurn.ID)
 	}
 }
+
+func TestPRStatsWithReviewerRecommendations(t *testing.T) {
+	stats := &PRStats{
+		TotalAdditions: 30,
+		TotalDeletions: 5,
+		FilesChanged:   1,
+		CommitCount:    1,
+		PrimaryFile:    "pkg/auth/token.go",
+		RecommendedReviewers: []ReviewerRecommendation{
+			{
+				Author:      "Alice",
+				CommitCount: 15,
+				TopFiles:    []string{"pkg/auth/token.go"},
+			},
+		},
+	}
+
+	calculateRisk(stats)
+	builder := sarif.NewBuilder()
+	stats.PopulateSARIF(builder)
+
+	report := builder.Build()
+	foundReviewersRule := false
+	for _, res := range report.Runs[0].Results {
+		if res.RuleID == RulePRReviewers.ID {
+			foundReviewersRule = true
+			if res.Level != "note" {
+				t.Errorf("expected level note, got %s", res.Level)
+			}
+		}
+	}
+
+	if !foundReviewersRule {
+		t.Errorf("expected %s in SARIF results", RulePRReviewers.ID)
+	}
+}

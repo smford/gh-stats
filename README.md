@@ -13,6 +13,7 @@ In high-velocity engineering organizations, code reviews often suffer from two m
 `gh-stats` acts as an automated reliability and architectural gate:
 - 🛡️ **Calculates PR Risk Scores (0–100):** Evaluates change size, cognitive load, test-to-code ratios, and blast radius.
 - 🚨 **Pinpoints High-Blast-Radius Changes:** Flags changes touching CI/CD, infrastructure-as-code, auth, and database schemas.
+- 👥 **Intelligent Reviewer Routing:** Analyzes historical git logs for modified files to recommend component domain experts.
 - 🔍 **Surfaces Code Churn Hotspots (Repo Mode):** Detects frequently modified files that correlate with regression incidents.
 - 👥 **Identifies Bus Factor Risk:** Highlights contributor concentration to mitigate domain knowledge silos.
 - 📋 **Seamless SARIF & Job Summary Integration:** Ingests into GitHub Code Scanning and renders formatted markdown tables in `$GITHUB_STEP_SUMMARY`.
@@ -167,6 +168,7 @@ jobs:
 | `GHSTATS004-PR-BLAST-RADIUS` | `warning` | PR | Critical file modified (CI/CD workflows, Terraform/k8s, DB migrations, lockfiles) |
 | `GHSTATS005-PR-STALE` | `warning` | PR | PR has remained open >14 days (stale branch / merge drift risk) |
 | `GHSTATS006-PR-DISCUSSION-CHURN` | `note` | PR | High comment volume (>15 comments) indicating review friction / ambiguity |
+| `GHSTATS007-PR-REVIEWERS` | `note` | PR | Historical domain experts recommended to review modified files |
 | `GHSTATS101-REPO-SUMMARY` | `note` | Repo | Architecture overview, test density %, language breakdown |
 | `GHSTATS102-REPO-HOTSPOTS` | `note` | Repo | High-churn files identified across commit history |
 | `GHSTATS103-REPO-BUS-FACTOR` | `warning` | Repo | Single contributor accounts for >75% of commits |
