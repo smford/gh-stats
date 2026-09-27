@@ -7,15 +7,15 @@ branding:
 
 inputs:
   target:
-    description: 'Target scope to analyze: "pr", "repo", or "auto" (auto detects based on pull_request event)'
+    description: 'Target scope to analyze: "pr", "repo", "release", "range", or "auto" (auto detects based on event)'
     required: false
     default: 'auto'
   base-ref:
-    description: 'Base git reference for PR diff (defaults to GitHub base branch or origin/main)'
+    description: 'Base git reference for PR or release comparison (defaults to auto-detected previous tag in release mode, or base branch in PR mode)'
     required: false
     default: ''
   head-ref:
-    description: 'Head git reference for PR diff (defaults to HEAD)'
+    description: 'Head git reference for PR or release comparison (defaults to HEAD or latest tag in release mode)'
     required: false
     default: 'HEAD'
   output:
@@ -39,7 +39,7 @@ inputs:
     required: false
     default: 'false'
   fail-on:
-    description: 'Fail the workflow if PR SRE risk level meets or exceeds threshold ("CRITICAL", "HIGH", "MEDIUM", "LOW")'
+    description: 'Fail the workflow if PR or release SRE risk level meets or exceeds threshold ("CRITICAL", "HIGH", "MEDIUM", "LOW")'
     required: false
     default: ''
   config-path:
@@ -84,8 +84,26 @@ outputs:
   ci-latency-seconds:
     description: 'Total cumulative duration of all CI check runs in seconds'
     value: ${{ steps.run-stats.outputs.ci-latency-seconds }}
+  release-base-ref:
+    description: 'Base ref used for release comparison'
+    value: ${{ steps.run-stats.outputs.release-base-ref }}
+  release-head-ref:
+    description: 'Head ref used for release comparison'
+    value: ${{ steps.run-stats.outputs.release-head-ref }}
+  release-commits-count:
+    description: 'Total number of commits in the release delta'
+    value: ${{ steps.run-stats.outputs.release-commits-count }}
+  release-breaking-count:
+    description: 'Total number of breaking changes and database migrations detected in the release delta'
+    value: ${{ steps.run-stats.outputs.release-breaking-count }}
+  release-risk-level:
+    description: 'Calculated deployment risk level for the release ("LOW", "MEDIUM", "HIGH", "CRITICAL")'
+    value: ${{ steps.run-stats.outputs.release-risk-level }}
+  release-risk-score:
+    description: 'Calculated deployment risk score for the release (0-100)'
+    value: ${{ steps.run-stats.outputs.release-risk-score }}
   target:
-    description: 'Resolved target mode (pr or repo)'
+    description: 'Resolved target mode (pr, repo, or release)'
     value: ${{ steps.run-stats.outputs.target }}
 
 runs:

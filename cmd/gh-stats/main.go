@@ -50,9 +50,9 @@ func main() {
 		flagCheckRuns     bool
 	)
 
-	flag.StringVar(&flagTarget, "target", getEnvDefault("INPUT_TARGET", getEnvDefault("INPUT_MODE", "auto")), "Target scope: 'pr', 'repo', or 'auto'")
-	flag.StringVar(&flagBaseRef, "base", getEnvDefault("INPUT_BASE_REF", os.Getenv("GITHUB_BASE_REF")), "Base ref for PR comparison (e.g. origin/main)")
-	flag.StringVar(&flagHeadRef, "head", getEnvDefault("INPUT_HEAD_REF", "HEAD"), "Head ref for PR comparison (default HEAD)")
+	flag.StringVar(&flagTarget, "target", getEnvDefault("INPUT_TARGET", getEnvDefault("INPUT_MODE", "auto")), "Target scope: 'pr', 'repo', 'release'/'range', or 'auto'")
+	flag.StringVar(&flagBaseRef, "base", getEnvDefault("INPUT_BASE_REF", os.Getenv("GITHUB_BASE_REF")), "Base ref for PR or release comparison (e.g. origin/main or v0.3.0)")
+	flag.StringVar(&flagHeadRef, "head", getEnvDefault("INPUT_HEAD_REF", "HEAD"), "Head ref for PR or release comparison (default HEAD)")
 	flag.StringVar(&flagOutput, "output", getEnvDefault("INPUT_SARIF_OUTPUT", getEnvDefault("INPUT_OUTPUT", "gh-stats.sarif")), "Path to output SARIF file")
 	flag.StringVar(&flagRepoPath, "repo-path", getEnvDefault("INPUT_REPO_PATH", "."), "Path to git repository")
 	flag.IntVar(&flagCommitLimit, "commit-limit", 0, "Maximum commit history to examine for repo hotspots (default 200)")
@@ -60,7 +60,7 @@ func main() {
 	flag.StringVar(&flagToken, "token", getEnvDefault("INPUT_TOKEN", os.Getenv("GITHUB_TOKEN")), "GitHub API token for metadata enrichment")
 	flag.IntVar(&flagPRNumber, "pr-number", 0, "Pull request number (auto-detected if omitted)")
 	flag.StringVar(&flagRepoSlug, "repo", getEnvDefault("GITHUB_REPOSITORY", ""), "GitHub repository slug owner/repo (auto-detected if omitted)")
-	flag.StringVar(&flagFailOn, "fail-on", getEnvDefault("INPUT_FAIL_ON", ""), "Fail workflow if PR risk meets/exceeds threshold (e.g. 'HIGH', 'CRITICAL')")
+	flag.StringVar(&flagFailOn, "fail-on", getEnvDefault("INPUT_FAIL_ON", ""), "Fail workflow if PR or release risk meets/exceeds threshold (e.g. 'HIGH', 'CRITICAL')")
 	flag.BoolVar(&flagCommentPR, "comment-pr", getEnvDefault("INPUT_COMMENT_PR", "false") == "true", "Post or update a sticky summary comment on the PR")
 	flag.StringVar(&flagExportJSON, "export-json", getEnvDefault("INPUT_EXPORT_JSON", ""), "Path to export DORA & SRE metrics JSON file")
 	flag.StringVar(&flagExportWebhook, "export-webhook", getEnvDefault("INPUT_EXPORT_WEBHOOK", ""), "Webhook URL to export DORA & SRE metrics")
@@ -82,9 +82,14 @@ func main() {
 	if target == "auto" {
 		if os.Getenv("GITHUB_EVENT_NAME") == "pull_request" || os.Getenv("GITHUB_BASE_REF") != "" {
 			target = "pr"
+		} else if os.Getenv("GITHUB_EVENT_NAME") == "release" {
+			target = "release"
 		} else {
 			target = "repo"
 		}
+	}
+	if target == "range" {
+		target = "release"
 	}
 
 	if !flagQuiet {
@@ -140,6 +145,7 @@ func main() {
 	var markdownSummary string
 	var prStats *analyzer.PRStats
 	var repoStats *analyzer.RepoStats
+	var releaseStats *analyzer.ReleaseStats
 
 	switch target {
 	case "pr":
@@ -293,8 +299,56 @@ func main() {
 				stats.TotalFiles, stats.TestFileRatio, len(stats.ChurnHotspots))
 		}
 
+	case "release":
+		baseRef := flagBaseRef
+		headRef := flagHeadRef
+
+		// If headRef not provided or is default HEAD, auto-detect from tags
+		if headRef == "" || headRef == "HEAD" {
+			if baseRef == "" {
+				bTag, hTag, err := runner.GetLatestTwoTags()
+				if err == nil {
+					baseRef = bTag
+					headRef = hTag
+				} else {
+					baseRef = "HEAD~1"
+					headRef = "HEAD"
+				}
+			} else {
+				if headRef == "" {
+					headRef = "HEAD"
+				}
+			}
+		} else if baseRef == "" {
+			prevTag, err := runner.GetPreviousTag(headRef)
+			if err == nil && prevTag != "" {
+				baseRef = prevTag
+			} else {
+				baseRef = headRef + "~1"
+			}
+		}
+
+		if !flagQuiet {
+			fmt.Printf("📦 Comparing Release: %s ... %s\n", baseRef, headRef)
+		}
+
+		stats, err := analyzer.AnalyzeRelease(runner, baseRef, headRef, cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error analyzing release: %v\n", err)
+			os.Exit(1)
+		}
+		releaseStats = stats
+
+		stats.PopulateSARIF(builder)
+		markdownSummary = reporter.GenerateReleaseSummary(stats)
+
+		if !flagQuiet {
+			fmt.Printf("✅ Release Analysis Complete: Risk=%s (%d/100), Commits=%d, Breaking Changes=%d, Files=%d, Additions=+%d, Deletions=-%d\n",
+				stats.RiskLevel, stats.RiskScore, stats.TotalCommits, len(stats.BreakingChanges), stats.FilesChanged, stats.TotalAdditions, stats.TotalDeletions)
+		}
+
 	default:
-		fmt.Fprintf(os.Stderr, "❌ Invalid target '%s'. Supported targets are 'pr' or 'repo'.\n", target)
+		fmt.Fprintf(os.Stderr, "❌ Invalid target '%s'. Supported targets are 'pr', 'repo', 'release', or 'range'.\n", target)
 		os.Exit(1)
 	}
 
@@ -335,6 +389,14 @@ func main() {
 		setGithubOutput("flaky-checks-count", fmt.Sprintf("%d", flakyCount))
 		setGithubOutput("ci-latency-seconds", fmt.Sprintf("%.0f", prStats.CIPipelineStats.TotalDuration.Seconds()))
 	}
+	if releaseStats != nil {
+		setGithubOutput("release-base-ref", releaseStats.BaseRef)
+		setGithubOutput("release-head-ref", releaseStats.HeadRef)
+		setGithubOutput("release-commits-count", fmt.Sprintf("%d", releaseStats.TotalCommits))
+		setGithubOutput("release-breaking-count", fmt.Sprintf("%d", len(releaseStats.BreakingChanges)))
+		setGithubOutput("release-risk-level", releaseStats.RiskLevel)
+		setGithubOutput("release-risk-score", fmt.Sprintf("%d", releaseStats.RiskScore))
+	}
 
 	if !flagQuiet && os.Getenv("GITHUB_ACTIONS") == "" {
 		fmt.Println("\n" + markdownSummary)
@@ -346,6 +408,8 @@ func main() {
 		metricsPayload = exporter.NewPRPayload(prStats, repoSlug)
 	} else if repoStats != nil {
 		metricsPayload = exporter.NewRepoPayload(repoStats, repoSlug)
+	} else if releaseStats != nil {
+		metricsPayload = exporter.NewReleasePayload(releaseStats, repoSlug)
 	}
 
 	if metricsPayload != nil {
@@ -380,6 +444,12 @@ func main() {
 		if analyzer.IsRiskThresholdMet(prStats.RiskLevel, flagFailOn) {
 			fmt.Fprintf(os.Stderr, "❌ Quality Gate Failed: PR SRE risk level [%s] meets or exceeds fail-on threshold [%s]\n",
 				prStats.RiskLevel, strings.ToUpper(flagFailOn))
+			os.Exit(2)
+		}
+	} else if target == "release" && releaseStats != nil && flagFailOn != "" {
+		if analyzer.IsRiskThresholdMet(releaseStats.RiskLevel, flagFailOn) {
+			fmt.Fprintf(os.Stderr, "❌ Quality Gate Failed: Release deployment risk level [%s] meets or exceeds fail-on threshold [%s]\n",
+				releaseStats.RiskLevel, strings.ToUpper(flagFailOn))
 			os.Exit(2)
 		}
 	}

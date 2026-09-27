@@ -89,3 +89,52 @@ func TestGenerateRepoSummary(t *testing.T) {
 		t.Errorf("expected test density in summary, got: %s", summary)
 	}
 }
+
+func TestGenerateReleaseSummary(t *testing.T) {
+	stats := &analyzer.ReleaseStats{
+		BaseRef:        "v0.3.0",
+		HeadRef:        "v0.4.0",
+		TotalCommits:   5,
+		TotalAdditions: 350,
+		TotalDeletions: 40,
+		NetChange:      310,
+		FilesChanged:   8,
+		RiskScore:      45,
+		RiskLevel:      "MEDIUM",
+		CodeLinesAdded: 250,
+		TestLinesAdded: 100,
+		TestRatio:      0.4,
+		Contributors: []analyzer.ContributorStat{
+			{Name: "Alice", CommitCount: 3, Percentage: 60.0},
+			{Name: "Bob", CommitCount: 2, Percentage: 40.0},
+		},
+		BreakingChanges: []analyzer.BreakingChange{
+			{CommitHash: "a1b2c3d", Subject: "feat!: breaking change to auth API", Reason: "conventional_commit"},
+		},
+		SensitiveFiles: []analyzer.SensitiveMatch{
+			{Path: ".github/workflows/ci.yml", Category: "CI/CD Pipelines", Additions: 15, Deletions: 2},
+		},
+	}
+
+	summary := GenerateReleaseSummary(stats)
+
+	if !strings.Contains(summary, "Release Comparison (`v0.3.0...v0.4.0`)") {
+		t.Errorf("expected header in summary, got: %s", summary)
+	}
+	if !strings.Contains(summary, "MEDIUM") {
+		t.Errorf("expected risk level MEDIUM, got: %s", summary)
+	}
+	if !strings.Contains(summary, "Breaking Changes & Schema Migrations") {
+		t.Errorf("expected breaking changes section, got: %s", summary)
+	}
+	if !strings.Contains(summary, "feat!: breaking change to auth API") {
+		t.Errorf("expected breaking commit in summary, got: %s", summary)
+	}
+	if !strings.Contains(summary, "High Blast Radius Files") {
+		t.Errorf("expected high blast radius section, got: %s", summary)
+	}
+	if !strings.Contains(summary, "Alice") || !strings.Contains(summary, "Bob") {
+		t.Errorf("expected contributors in summary, got: %s", summary)
+	}
+}
+

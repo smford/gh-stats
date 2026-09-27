@@ -325,4 +325,53 @@ var (
 		},
 		DefaultConfiguration: &sarif.RuleConfiguration{Level: "warning"},
 	}
+
+	RuleReleaseSummary = sarif.Rule{
+		ID:   "GHSTATS201-RELEASE-SUMMARY",
+		Name: "ReleaseComparisonSummary",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "Release comparison delta and SRE deployment readiness summary",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "Aggregates commit velocity, test-to-code ratio, breaking changes, and blast radius risk scoring across release milestones.",
+		},
+		Help: &sarif.MultiformatMessage{
+			Text:     "Verify that breaking changes are documented in migration guides, blast radius files have appropriate sign-offs, and adequate test coverage delta is present.",
+			Markdown: "### Release Readiness Guidance\n- **Verification**: Review breaking changes and ensure API migration guides are published.\n- **Blast Radius**: Verify infrastructure, pipeline, and schema changes before deployment.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "note"},
+	}
+
+	RuleReleaseBreaking = sarif.Rule{
+		ID:   "GHSTATS202-RELEASE-BREAKING",
+		Name: "BreakingChangeDetectedInRelease",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "Breaking changes or schema migrations detected in release comparison",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "Commits with breaking change syntax or modifications to database schema migrations alter backwards compatibility and require deployment precautions.",
+		},
+		Help: &sarif.MultiformatMessage{
+			Text:     "Ensure backwards compatibility, data migration scripts, and roll-forward/roll-back verification are in place.",
+			Markdown: "### Breaking Change SRE Guidance\n- **Zero-Downtime Deployments**: Use expand-contract pattern for schema migrations.\n- **Deprecations**: Ensure downstream consumers received deprecation notices.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "warning"},
+	}
+
+	RuleReleaseBlastRadius = sarif.Rule{
+		ID:   "GHSTATS203-RELEASE-BLAST-RADIUS",
+		Name: "ReleaseHighBlastRadiusDetected",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "Release comparison delta modifies critical infrastructure, pipeline, or dependency files",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "Changes to CI/CD workflows, infrastructure manifests, database migrations, or core dependencies across release milestones elevate deployment risk.",
+		},
+		Help: &sarif.MultiformatMessage{
+			Text:     "Review sensitive file changes to ensure cloud configurations, pipeline security, and infrastructure changes are validated prior to production release.",
+			Markdown: "### Blast Radius Verification\n- **Sign-off**: Ensure infrastructure and security changes have explicit platform engineer sign-off.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "warning"},
+	}
 )
+

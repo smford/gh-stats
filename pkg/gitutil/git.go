@@ -66,6 +66,8 @@ type CommitInfo struct {
 	Hash    string
 	Author  string
 	Subject string
+	Date    string
+	Body    string
 }
 
 // IsShallow returns true if the repository is a shallow clone.
@@ -281,3 +283,139 @@ func (r *Runner) ListTrackedFiles() ([]string, error) {
 	}
 	return files, nil
 }
+
+// GetReleaseTags returns all repository tags sorted by version descending.
+func (r *Runner) GetReleaseTags() ([]string, error) {
+	out, err := r.Exec("tag", "--sort=-v:refname")
+	if err != nil || strings.TrimSpace(out) == "" {
+		out, err = r.Exec("tag", "--sort=-creatordate")
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var tags []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			tags = append(tags, line)
+		}
+	}
+	return tags, nil
+}
+
+// GetInitialCommit returns the repository's root/first commit SHA.
+func (r *Runner) GetInitialCommit() (string, error) {
+	out, err := r.Exec("rev-list", "--max-parents=0", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) > 0 && lines[0] != "" {
+		return strings.TrimSpace(lines[0]), nil
+	}
+	return "", fmt.Errorf("could not determine initial commit")
+}
+
+// GetLatestTwoTags returns the latest tag (headTag) and the one directly preceding it (baseTag).
+// If only one tag exists, baseTag is the initial commit hash.
+func (r *Runner) GetLatestTwoTags() (baseTag, headTag string, err error) {
+	tags, err := r.GetReleaseTags()
+	if err != nil {
+		return "", "", err
+	}
+	if len(tags) == 0 {
+		return "", "", fmt.Errorf("no release tags found in repository")
+	}
+	headTag = tags[0]
+	if len(tags) >= 2 {
+		baseTag = tags[1]
+		return baseTag, headTag, nil
+	}
+
+	// Only 1 tag exists; resolve initial commit as base
+	initCommit, initErr := r.GetInitialCommit()
+	if initErr == nil && initCommit != "" {
+		baseTag = initCommit
+	} else {
+		baseTag = headTag + "~1"
+	}
+	return baseTag, headTag, nil
+}
+
+// GetPreviousTag finds the release tag immediately preceding headTag.
+func (r *Runner) GetPreviousTag(headTag string) (string, error) {
+	tags, err := r.GetReleaseTags()
+	if err != nil {
+		return "", err
+	}
+	for i, t := range tags {
+		if t == headTag {
+			if i+1 < len(tags) {
+				return tags[i+1], nil
+			}
+			// headTag is the oldest tag; return initial commit
+			initCommit, err := r.GetInitialCommit()
+			if err == nil && initCommit != "" {
+				return initCommit, nil
+			}
+			return headTag + "~1", nil
+		}
+	}
+	if len(tags) > 0 {
+		return tags[0], nil
+	}
+	return "", fmt.Errorf("tag %s not found and no previous tag available", headTag)
+}
+
+// GetReleaseCommits retrieves commits between baseRef and headRef with date and body.
+func (r *Runner) GetReleaseCommits(baseRef, headRef string) ([]CommitInfo, error) {
+	if baseRef == "staged" || baseRef == "--cached" {
+		return nil, nil
+	}
+
+	var diffRange string
+	if baseRef == "" || baseRef == "root" {
+		diffRange = headRef
+	} else {
+		diffRange = fmt.Sprintf("%s..%s", baseRef, headRef)
+	}
+
+	out, err := r.Exec("log", "--format=%h\x1f%an\x1f%aI\x1f%s\x1f%b\x1e", diffRange)
+	if err != nil {
+		// Fallback to three-dot if two-dot failed
+		if baseRef != "" && baseRef != "root" {
+			diffRange = fmt.Sprintf("%s...%s", baseRef, headRef)
+			out, err = r.Exec("log", "--format=%h\x1f%an\x1f%aI\x1f%s\x1f%b\x1e", diffRange)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
+	}
+
+	var commits []CommitInfo
+	records := strings.Split(out, "\x1e")
+	for _, rec := range records {
+		rec = strings.TrimSpace(rec)
+		if rec == "" {
+			continue
+		}
+		parts := strings.Split(rec, "\x1f")
+		if len(parts) >= 4 {
+			c := CommitInfo{
+				Hash:    strings.TrimSpace(parts[0]),
+				Author:  strings.TrimSpace(parts[1]),
+				Date:    strings.TrimSpace(parts[2]),
+				Subject: strings.TrimSpace(parts[3]),
+			}
+			if len(parts) >= 5 {
+				c.Body = strings.TrimSpace(parts[4])
+			}
+			commits = append(commits, c)
+		}
+	}
+	return commits, nil
+}
+

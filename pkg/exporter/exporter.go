@@ -18,13 +18,35 @@ import (
 
 // DORAMetricsPayload models structured DORA and SRE observability metrics.
 type DORAMetricsPayload struct {
-	SchemaVersion string       `json:"schemaVersion"`
-	Timestamp     time.Time    `json:"timestamp"`
-	Target        string       `json:"target"` // "pr" or "repo"
-	Repository    string       `json:"repository"`
-	Ref           string       `json:"ref,omitempty"`
-	PR            *PRMetrics   `json:"pr,omitempty"`
-	Repo          *RepoMetrics `json:"repo,omitempty"`
+	SchemaVersion string          `json:"schemaVersion"`
+	Timestamp     time.Time       `json:"timestamp"`
+	Target        string          `json:"target"` // "pr", "repo", or "release"
+	Repository    string          `json:"repository"`
+	Ref           string          `json:"ref,omitempty"`
+	PR            *PRMetrics      `json:"pr,omitempty"`
+	Repo          *RepoMetrics    `json:"repo,omitempty"`
+	Release       *ReleaseMetrics `json:"release,omitempty"`
+}
+
+// ReleaseMetrics encapsulates release comparison delta, commit volume, breaking changes, and risk.
+type ReleaseMetrics struct {
+	BaseRef              string   `json:"baseRef"`
+	HeadRef              string   `json:"headRef"`
+	RiskScore            int      `json:"riskScore"`
+	RiskLevel            string   `json:"riskLevel"`
+	TotalCommits         int      `json:"totalCommits"`
+	ContributorsCount    int      `json:"contributorsCount"`
+	TotalAdditions       int      `json:"totalAdditions"`
+	TotalDeletions       int      `json:"totalDeletions"`
+	NetChange            int      `json:"netChange"`
+	FilesChanged         int      `json:"filesChanged"`
+	TestLinesAdded       int      `json:"testLinesAdded"`
+	CodeLinesAdded       int      `json:"codeLinesAdded"`
+	TestRatio            float64  `json:"testRatio"`
+	BreakingChangesCount int      `json:"breakingChangesCount"`
+	BreakingChanges      []string `json:"breakingChanges,omitempty"`
+	SensitiveFilesCount  int      `json:"sensitiveFilesCount"`
+	SensitiveCategories  []string `json:"sensitiveCategories"`
 }
 
 // PRMetrics encapsulates DORA change lead time, reliability risk, and size metrics.
@@ -182,6 +204,53 @@ func NewRepoPayload(stats *analyzer.RepoStats, repoSlug string) *DORAMetricsPayl
 		Repo:          repoMetrics,
 	}
 }
+
+// NewReleasePayload constructs a DORAMetricsPayload from ReleaseStats.
+func NewReleasePayload(stats *analyzer.ReleaseStats, repoSlug string) *DORAMetricsPayload {
+	var categories []string
+	catSet := make(map[string]bool)
+	for _, sf := range stats.SensitiveFiles {
+		if !catSet[sf.Category] {
+			catSet[sf.Category] = true
+			categories = append(categories, sf.Category)
+		}
+	}
+
+	var breakingList []string
+	for _, bc := range stats.BreakingChanges {
+		breakingList = append(breakingList, bc.Subject)
+	}
+
+	relMetrics := &ReleaseMetrics{
+		BaseRef:              stats.BaseRef,
+		HeadRef:              stats.HeadRef,
+		RiskScore:            stats.RiskScore,
+		RiskLevel:            stats.RiskLevel,
+		TotalCommits:         stats.TotalCommits,
+		ContributorsCount:    len(stats.Contributors),
+		TotalAdditions:       stats.TotalAdditions,
+		TotalDeletions:       stats.TotalDeletions,
+		NetChange:            stats.NetChange,
+		FilesChanged:         stats.FilesChanged,
+		TestLinesAdded:       stats.TestLinesAdded,
+		CodeLinesAdded:       stats.CodeLinesAdded,
+		TestRatio:            stats.TestRatio,
+		BreakingChangesCount: len(stats.BreakingChanges),
+		BreakingChanges:      breakingList,
+		SensitiveFilesCount:  len(stats.SensitiveFiles),
+		SensitiveCategories:  categories,
+	}
+
+	return &DORAMetricsPayload{
+		SchemaVersion: "1.0.0",
+		Timestamp:     time.Now().UTC(),
+		Target:        "release",
+		Repository:    repoSlug,
+		Ref:           stats.HeadRef,
+		Release:       relMetrics,
+	}
+}
+
 
 // ExportJSON serializes payload to a formatted JSON file.
 func ExportJSON(payload *DORAMetricsPayload, filePath string) error {
