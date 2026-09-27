@@ -200,6 +200,112 @@ func GenerateRepoSummary(stats *analyzer.RepoStats) string {
 	return sb.String()
 }
 
+// GenerateReleaseSummary generates a GitHub Step Summary Markdown string for release comparison.
+func GenerateReleaseSummary(stats *analyzer.ReleaseStats) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# 📦 GitHub Stats: Release Comparison (`%s...%s`)\n\n", stats.BaseRef, stats.HeadRef))
+
+	sb.WriteString(fmt.Sprintf("> **Release Deployment Risk:** `%s` (Score: **%d / 100**) 🛡️\n\n", stats.RiskLevel, stats.RiskScore))
+
+	sb.WriteString("## 📊 Release Delta Overview\n\n")
+	sb.WriteString("| Metric | Value |\n")
+	sb.WriteString("| :--- | :--- |\n")
+	sb.WriteString(fmt.Sprintf("| **Comparison Range** | `%s` ... `%s` |\n", stats.BaseRef, stats.HeadRef))
+	sb.WriteString(fmt.Sprintf("| **Commits** | `%d` |\n", stats.TotalCommits))
+	sb.WriteString(fmt.Sprintf("| **Contributors** | `%d` unique author(s) |\n", len(stats.Contributors)))
+	sb.WriteString(fmt.Sprintf("| **Lines Added** | `+%d` |\n", stats.TotalAdditions))
+	sb.WriteString(fmt.Sprintf("| **Lines Deleted** | `-%d` |\n", stats.TotalDeletions))
+	sb.WriteString(fmt.Sprintf("| **Net Delta** | `%+d` lines |\n", stats.NetChange))
+
+	fileBreakdown := fmt.Sprintf("Code: `%d`, Tests: `%d`, Docs: `%d`", stats.CodeFilesCount, stats.TestFilesCount, stats.DocFilesCount)
+	if stats.GeneratedFilesCount > 0 {
+		fileBreakdown = fmt.Sprintf("Code: `%d`, Tests: `%d`, Gen: `%d`, Docs: `%d`", stats.CodeFilesCount, stats.TestFilesCount, stats.GeneratedFilesCount, stats.DocFilesCount)
+	}
+	sb.WriteString(fmt.Sprintf("| **Files Modified** | `%d` (%s) |\n", stats.FilesChanged, fileBreakdown))
+	sb.WriteString(fmt.Sprintf("| **Test vs Code Delta** | `+%d` test lines / `+%d` code lines (%.1f%%) |\n", stats.TestLinesAdded, stats.CodeLinesAdded, stats.TestRatio*100))
+
+	// Breaking changes section
+	if len(stats.BreakingChanges) > 0 {
+		sb.WriteString("\n## ⚠️ Breaking Changes & Schema Migrations\n\n")
+		sb.WriteString("| Commit / Item | Description | Type |\n")
+		sb.WriteString("| :--- | :--- | :--- |\n")
+		for _, bc := range stats.BreakingChanges {
+			ref := bc.CommitHash
+			if ref == "" {
+				ref = "Schema"
+			} else {
+				ref = fmt.Sprintf("`%s`", ref)
+			}
+			sb.WriteString(fmt.Sprintf("| %s | %s | `%s` |\n", ref, bc.Subject, bc.Reason))
+		}
+	}
+
+	// Categorized Changelog
+	hasChangelog := len(stats.CategorizedCommits.Features) > 0 ||
+		len(stats.CategorizedCommits.Fixes) > 0 ||
+		len(stats.CategorizedCommits.Performance) > 0 ||
+		len(stats.CategorizedCommits.Refactoring) > 0
+
+	if hasChangelog {
+		sb.WriteString("\n## 📝 Release Changelog\n\n")
+
+		if len(stats.CategorizedCommits.Features) > 0 {
+			sb.WriteString("### 🚀 Features\n\n")
+			for _, c := range stats.CategorizedCommits.Features {
+				sb.WriteString(fmt.Sprintf("- [`%s`] %s (@%s)\n", c.Hash, c.Subject, c.Author))
+			}
+			sb.WriteString("\n")
+		}
+
+		if len(stats.CategorizedCommits.Fixes) > 0 {
+			sb.WriteString("### 🐛 Bug Fixes\n\n")
+			for _, c := range stats.CategorizedCommits.Fixes {
+				sb.WriteString(fmt.Sprintf("- [`%s`] %s (@%s)\n", c.Hash, c.Subject, c.Author))
+			}
+			sb.WriteString("\n")
+		}
+
+		if len(stats.CategorizedCommits.Performance) > 0 {
+			sb.WriteString("### ⚡ Performance Improvements\n\n")
+			for _, c := range stats.CategorizedCommits.Performance {
+				sb.WriteString(fmt.Sprintf("- [`%s`] %s (@%s)\n", c.Hash, c.Subject, c.Author))
+			}
+			sb.WriteString("\n")
+		}
+
+		if len(stats.CategorizedCommits.Refactoring) > 0 {
+			sb.WriteString("### 🛠️ Refactoring\n\n")
+			for _, c := range stats.CategorizedCommits.Refactoring {
+				sb.WriteString(fmt.Sprintf("- [`%s`] %s (@%s)\n", c.Hash, c.Subject, c.Author))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// High Blast Radius Files
+	if len(stats.SensitiveFiles) > 0 {
+		sb.WriteString("\n## 🛡️ High Blast Radius Files\n\n")
+		sb.WriteString("| Path | Category | Delta |\n")
+		sb.WriteString("| :--- | :--- | :--- |\n")
+		for _, sf := range stats.SensitiveFiles {
+			sb.WriteString(fmt.Sprintf("| `%s` | %s | `+%d / -%d` |\n", sf.Path, sf.Category, sf.Additions, sf.Deletions))
+		}
+	}
+
+	// Contributors table
+	if len(stats.Contributors) > 0 {
+		sb.WriteString("\n## 👥 Release Contributors\n\n")
+		sb.WriteString("| Contributor | Commits | Share |\n")
+		sb.WriteString("| :--- | :---: | :---: |\n")
+		for _, c := range stats.Contributors {
+			sb.WriteString(fmt.Sprintf("| **%s** | `%d` | `%.1f%%` |\n", c.Name, c.CommitCount, c.Percentage))
+		}
+	}
+
+	return sb.String()
+}
+
+
 // WriteStepSummary writes the markdown summary to GITHUB_STEP_SUMMARY if available.
 func WriteStepSummary(summary string) error {
 	summaryPath := os.Getenv("GITHUB_STEP_SUMMARY")

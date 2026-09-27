@@ -138,15 +138,15 @@ jobs:
 
 | Input | Description | Default | Required |
 | :--- | :--- | :---: | :---: |
-| `target` | Analysis mode: `'pr'`, `'repo'`, or `'auto'` (auto-detects based on event) | `'auto'` | No |
-| `base-ref` | Base git reference for PR diff | `github.base_ref` | No |
-| `head-ref` | Head git reference for PR diff | `HEAD` | No |
+| `target` | Analysis mode: `'pr'`, `'repo'`, `'release'`, `'range'`, or `'auto'` (auto-detects based on event) | `'auto'` | No |
+| `base-ref` | Base git reference for PR or release comparison (defaults to auto-detected previous tag in release mode, or base branch in PR mode) | `github.base_ref` | No |
+| `head-ref` | Head git reference for PR or release comparison (defaults to HEAD or latest tag) | `HEAD` | No |
 | `output` | Destination file path for generated SARIF report | `gh-stats.sarif` | No |
 | `commit-limit` | Maximum commit history to analyze in `repo` mode | `200` | No |
 | `upload-sarif` | Automatically upload SARIF to GitHub Code Scanning via `@actions/upload-sarif` | `'true'` | No |
 | `category` | SARIF category label in GitHub Code Scanning | `gh-stats` | No |
 | `comment-pr` | Post or update a live sticky Markdown summary comment on the PR conversation thread | `'false'` | No |
-| `fail-on` | Enforce risk budget gating: fail job if risk meets/exceeds threshold (`'CRITICAL'`, `'HIGH'`, `'MEDIUM'`, `'LOW'`) | `''` (disabled) | No |
+| `fail-on` | Enforce risk budget gating: fail job if PR or release risk meets/exceeds threshold (`'CRITICAL'`, `'HIGH'`, `'MEDIUM'`, `'LOW'`) | `''` (disabled) | No |
 | `config-path` | Path to `.gh-stats.yml` configuration file (auto-discovers `.gh-stats.yml` or `.github/.gh-stats.yml` if omitted) | `''` | No |
 | `export-json` | File path to export structured DORA & SRE metrics in JSON format | `''` (disabled) | No |
 | `export-webhook` | HTTP/HTTPS Webhook endpoint to dispatch DORA & SRE metrics payload | `''` (disabled) | No |
@@ -159,7 +159,13 @@ jobs:
 | :--- | :--- |
 | `sarif-file` | Path to the generated SARIF report file |
 | `metrics-json` | Path to the exported metrics JSON file (if `export-json` was enabled) |
-| `target` | Resolved analysis target (`pr` or `repo`) |
+| `release-base-ref` | Base git reference used in release comparison mode |
+| `release-head-ref` | Head git reference used in release comparison mode |
+| `release-commits-count` | Total commit count in the release delta |
+| `release-breaking-count` | Number of breaking changes and database migrations detected in the release |
+| `release-risk-level` | Evaluated deployment risk rating (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) |
+| `release-risk-score` | Numerical deployment risk score (0-100) |
+| `target` | Resolved analysis target (`pr`, `repo`, or `release`) |
 
 ---
 
@@ -174,10 +180,15 @@ jobs:
 | `GHSTATS005-PR-STALE` | `warning` | PR | PR has remained open >14 days (stale branch / merge drift risk) |
 | `GHSTATS006-PR-DISCUSSION-CHURN` | `note` | PR | High comment volume (>15 comments) indicating review friction / ambiguity |
 | `GHSTATS007-PR-REVIEWERS` | `note` | PR | Historical domain experts recommended to review modified files |
+| `GHSTATS008-PR-CI-LATENCY` | `warning` | PR | CI pipeline check run exceeds latency threshold |
+| `GHSTATS009-PR-CI-FLAKINESS` | `warning` | PR | CI check run failed and then passed on retry on the same commit SHA |
 | `GHSTATS101-REPO-SUMMARY` | `note` | Repo | Architecture overview, test density %, language breakdown |
 | `GHSTATS102-REPO-HOTSPOTS` | `note` | Repo | High-churn files identified across commit history |
 | `GHSTATS103-REPO-BUS-FACTOR` | `warning` | Repo | Single contributor accounts for >75% of commits |
 | `GHSTATS104-REPO-API-METADATA` | `note` | Repo | GitHub ecosystem metrics (stars, forks, open issue queue) |
+| `GHSTATS201-RELEASE-SUMMARY` | `note` | Release | Release comparison delta, velocity, breaking change count, and readiness summary |
+| `GHSTATS202-RELEASE-BREAKING` | `warning` | Release | Breaking change syntax (`!:`, `BREAKING CHANGE:`) or database schema migrations detected |
+| `GHSTATS203-RELEASE-BLAST-RADIUS` | `warning` | Release | High-blast-radius infrastructure, CI/CD, or auth files modified in release |
 
 ---
 
@@ -278,6 +289,98 @@ Slow and flaky CI pipelines are among the highest sources of developer friction,
 
 ---
 
+## 📦 Release Comparison Mode (`--target=release` or `--target=range`)
+
+Preparing a release candidate or deploying a milestone requires understanding the full scope of changes between tags. Without automated delta analysis, teams often ship silent breaking changes, undocumented migrations, or infrastructure alterations.
+
+`gh-stats` provides a specialized **Release Comparison Mode** that evaluates the exact delta between two release milestones:
+
+- **Smart Tag Auto-Detection:**
+  - Running `gh-stats --target=release` automatically identifies the latest two SemVer release tags (e.g. `v0.3.0` and `v0.4.0`) and calculates the delta.
+  - Specify custom releases or branches via `--base` and `--head` (e.g. `--base=v0.2.0 --head=v0.4.0` or `--base=v0.4.0 --head=HEAD`).
+  - `--target=range` is fully supported as an intuitive alias.
+- **Breaking Change & Schema Migration Detection:**
+  - Identifies Conventional Commits breaking changes (`feat!:`, `fix!:`, or `BREAKING CHANGE:`).
+  - Flags database schema migration files (`*.sql` or `migrations/`).
+- **Velocity & Test Delta:**
+  - Tracks lines added, lines deleted, net code volume, and test-to-code velocity ratio across the release window.
+- **Categorized Release Notes / Changelog:**
+  - Automatically groups commits into Features (🚀), Bug Fixes (🐛), Performance (⚡), Refactoring (🛠️), and Chores.
+- **Deployment Risk Scoring & Quality Gate:**
+  - Rates release risk from `LOW` to `CRITICAL` based on breaking changes, migration presence, volume, and blast radius.
+  - Blocks deployment pipelines using `--fail-on=HIGH` or `--fail-on=CRITICAL`.
+- **DORA Observability:** Exports structured release metrics to JSON or observability webhooks.
+
+### Sample Release Step Summary:
+
+```markdown
+# 📦 GitHub Stats: Release Comparison (`v0.3.0...v0.4.0`)
+
+> **Release Deployment Risk:** `LOW` (Score: **20 / 100**) 🛡️
+
+## 📊 Release Delta Overview
+
+| Metric | Value |
+| :--- | :--- |
+| **Comparison Range** | `v0.3.0` ... `v0.4.0` |
+| **Commits** | `3` |
+| **Contributors** | `2` unique author(s) |
+| **Lines Added** | `+885` |
+| **Lines Deleted** | `-25` |
+| **Net Delta** | `+860` lines |
+| **Files Modified** | `17` (Code: `10`, Tests: `5`, Docs: `2`) |
+| **Test vs Code Delta** | `+245` test lines / `+554` code lines (44.2%) |
+
+## 📝 Release Changelog
+
+### 🚀 Features
+- [`959165b`] feat: CI Pipeline Latency & Flakiness Detection (@smford)
+```
+
+### GitHub Actions Release Workflow (`.github/workflows/release-stats.yml`)
+
+```yaml
+name: Release Readiness & Health
+
+on:
+  release:
+    types: [ published ]
+  workflow_dispatch:
+    inputs:
+      base_tag:
+        description: 'Base release tag (auto-detected if blank)'
+        required: false
+      head_tag:
+        description: 'Head release tag (defaults to current release/HEAD)'
+        required: false
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  release-audit:
+    name: Release SRE Readiness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gh-stats Release Comparison
+        uses: smford/gh-stats@main
+        with:
+          target: release
+          base-ref: ${{ inputs.base_tag }}
+          head-ref: ${{ inputs.head_tag }}
+          output: release-stats.sarif
+          fail-on: 'CRITICAL'
+          export-json: release-metrics.json
+```
+
+---
+
 ## 💻 Local CLI Usage
 
 You can build and run `gh-stats` locally on any git repository:
@@ -291,6 +394,12 @@ go build -o gh-stats ./cmd/gh-stats
 
 # Analyze a feature branch PR against main
 ./gh-stats -target=pr -base=main -head=HEAD -output=pr.sarif
+
+# Compare latest two releases automatically
+./gh-stats -target=release
+
+# Compare a specific release range
+./gh-stats -target=range -base=v0.2.0 -head=v0.4.0
 
 # Use a custom configuration file
 ./gh-stats -target=pr -config=.github/.gh-stats.yml
@@ -311,11 +420,11 @@ gh-stats -version
 ### CLI Flags:
 ```text
   -target string
-        Target scope: 'pr', 'repo', or 'auto' (default "auto")
+        Target scope: 'pr', 'repo', 'release'/'range', or 'auto' (default "auto")
   -base string
-        Base ref for PR comparison (e.g. origin/main)
+        Base ref for PR or release comparison (e.g. origin/main or v0.3.0)
   -head string
-        Head ref for PR comparison (default "HEAD")
+        Head ref for PR or release comparison (default "HEAD")
   -config string
         Path to .gh-stats.yml configuration file
   -output string
@@ -325,7 +434,7 @@ gh-stats -version
   -commit-limit int
         Maximum commit history to examine for repo hotspots (default 200)
   -fail-on string
-        Fail workflow if PR risk meets/exceeds threshold (e.g. 'HIGH', 'CRITICAL')
+        Fail workflow if PR or release risk meets/exceeds threshold (e.g. 'HIGH', 'CRITICAL')
   -comment-pr
         Post or update a sticky summary comment on the PR
   -export-json string

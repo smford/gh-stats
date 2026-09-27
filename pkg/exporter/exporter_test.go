@@ -179,3 +179,51 @@ func TestExportWebhook(t *testing.T) {
 		t.Errorf("expected non-empty webhook payload")
 	}
 }
+
+func TestNewReleasePayload(t *testing.T) {
+	stats := &analyzer.ReleaseStats{
+		BaseRef:        "v0.3.0",
+		HeadRef:        "v0.4.0",
+		TotalCommits:   12,
+		TotalAdditions: 800,
+		TotalDeletions: 120,
+		NetChange:      680,
+		FilesChanged:   14,
+		CodeLinesAdded: 600,
+		TestLinesAdded: 200,
+		TestRatio:      0.33,
+		RiskScore:      40,
+		RiskLevel:      "MEDIUM",
+		Contributors: []analyzer.ContributorStat{
+			{Name: "Alice", CommitCount: 8, Percentage: 66.7},
+			{Name: "Bob", CommitCount: 4, Percentage: 33.3},
+		},
+		BreakingChanges: []analyzer.BreakingChange{
+			{CommitHash: "c1d2e3f", Subject: "feat!: breaking api change", Reason: "conventional_commit"},
+		},
+		SensitiveFiles: []analyzer.SensitiveMatch{
+			{Path: ".github/workflows/release.yml", Category: "CI/CD Pipelines"},
+		},
+	}
+
+	payload := NewReleasePayload(stats, "smford/gh-stats")
+	if payload.Target != "release" {
+		t.Errorf("expected target 'release', got '%s'", payload.Target)
+	}
+	if payload.Release == nil {
+		t.Fatalf("expected Release payload, got nil")
+	}
+	if payload.Release.BaseRef != "v0.3.0" || payload.Release.HeadRef != "v0.4.0" {
+		t.Errorf("expected v0.3.0...v0.4.0, got %s...%s", payload.Release.BaseRef, payload.Release.HeadRef)
+	}
+	if payload.Release.BreakingChangesCount != 1 {
+		t.Errorf("expected 1 breaking change, got %d", payload.Release.BreakingChangesCount)
+	}
+	if payload.Release.ContributorsCount != 2 {
+		t.Errorf("expected 2 contributors, got %d", payload.Release.ContributorsCount)
+	}
+	if len(payload.Release.SensitiveCategories) != 1 || payload.Release.SensitiveCategories[0] != "CI/CD Pipelines" {
+		t.Errorf("expected CI/CD Pipelines category, got %v", payload.Release.SensitiveCategories)
+	}
+}
+

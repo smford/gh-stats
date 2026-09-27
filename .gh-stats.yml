@@ -29,7 +29,7 @@ ignore:
     - "**/*.min.js"
     - "**/*_gen.go"
 
-# Default quality gate threshold: fails workflow if PR risk meets or exceeds this level
+# Default quality gate threshold: fails workflow if PR or release risk meets or exceeds this level
 # Options: LOW, MEDIUM, HIGH, CRITICAL
 # fail_on: "CRITICAL"
 

@@ -44,4 +44,51 @@ func TestGitRunner(t *testing.T) {
 	if len(fileAuthors) == 0 {
 		t.Errorf("expected at least one author for README.md")
 	}
+
+	// Test GetInitialCommit
+	initCommit, err := runner.GetInitialCommit()
+	if err != nil || initCommit == "" {
+		t.Fatalf("expected initial commit SHA, got %s, err: %v", initCommit, err)
+	}
+
+	// Test GetReleaseTags
+	tags, err := runner.GetReleaseTags()
+	if err != nil {
+		t.Fatalf("failed to get release tags: %v", err)
+	}
+	if len(tags) == 0 {
+		t.Errorf("expected at least one tag in repo history")
+	}
+
+	// Test GetLatestTwoTags
+	baseTag, headTag, err := runner.GetLatestTwoTags()
+	if err != nil {
+		t.Fatalf("failed to get latest two tags: %v", err)
+	}
+	if baseTag == "" || headTag == "" {
+		t.Errorf("expected non-empty base and head tags, got base=%s, head=%s", baseTag, headTag)
+	}
+
+	// Test GetPreviousTag
+	prevTag, err := runner.GetPreviousTag(headTag)
+	if err != nil {
+		t.Fatalf("failed to get previous tag for %s: %v", headTag, err)
+	}
+	if prevTag == "" {
+		t.Errorf("expected previous tag for %s, got empty", headTag)
+	}
+
+	// Test GetReleaseCommits between baseTag and headTag
+	commits, err := runner.GetReleaseCommits(baseTag, headTag)
+	if err != nil {
+		t.Fatalf("failed to get release commits between %s and %s: %v", baseTag, headTag, err)
+	}
+	if len(commits) == 0 {
+		t.Logf("no commits between %s and %s (may be identical commit)", baseTag, headTag)
+	} else {
+		if commits[0].Hash == "" || commits[0].Subject == "" {
+			t.Errorf("expected valid commit metadata, got %+v", commits[0])
+		}
+	}
 }
+
