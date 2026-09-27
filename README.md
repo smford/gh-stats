@@ -130,6 +130,15 @@ jobs:
           category: 'gh-stats-repo'
 ```
 
+### 3. Automated SemVer Release Workflow (`.github/workflows/release.yml`)
+
+Merges to `main` automatically trigger automated SemVer release generation:
+- 🏷️ **SemVer Versioning:** Inspects commit messages since the previous tag using conventional commit rules (`BREAKING CHANGE` or `!:` triggers **major**, `feat:` triggers **minor**, all other commits trigger **patch**).
+- 📦 **Cross-Platform Compilation:** Compiles statically linked standalone binaries for Linux (`amd64`, `arm64`), macOS (`amd64`, `arm64`), and Windows (`amd64`), alongside SHA256 `checksums.txt`.
+- 📌 **Floating Major Tags:** Automatically updates floating major version tags (e.g. `@v1`) so consumers can reliably pin actions.
+- 🚀 **GitHub Releases:** Generates release notes and attaches multi-architecture artifacts to GitHub Releases.
+- 🎛️ **Manual Dispatch:** Supports `workflow_dispatch` with customizable bump types (`patch`, `minor`, `major`) or explicit version overrides (`custom_version`).
+
 ---
 
 ## ⚙️ Action Inputs & Outputs

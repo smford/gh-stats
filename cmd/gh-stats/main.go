@@ -17,6 +17,8 @@ import (
 	"github.com/smford/gh-stats/pkg/sarif"
 )
 
+var version = "dev"
+
 func main() {
 	var (
 		flagTarget      string
@@ -32,6 +34,7 @@ func main() {
 		flagFailOn      string
 		flagCommentPR   bool
 		flagQuiet       bool
+		flagVersion     bool
 	)
 
 	flag.StringVar(&flagTarget, "target", getEnvDefault("INPUT_TARGET", getEnvDefault("INPUT_MODE", "auto")), "Target scope: 'pr', 'repo', or 'auto'")
@@ -47,7 +50,13 @@ func main() {
 	flag.StringVar(&flagFailOn, "fail-on", getEnvDefault("INPUT_FAIL_ON", ""), "Fail workflow if PR risk meets/exceeds threshold (e.g. 'HIGH', 'CRITICAL')")
 	flag.BoolVar(&flagCommentPR, "comment-pr", getEnvDefault("INPUT_COMMENT_PR", "false") == "true", "Post or update a sticky summary comment on the PR")
 	flag.BoolVar(&flagQuiet, "quiet", false, "Suppress stdout output")
+	flag.BoolVar(&flagVersion, "version", false, "Print gh-stats version and exit")
 	flag.Parse()
+
+	if flagVersion {
+		fmt.Printf("gh-stats version %s\n", version)
+		os.Exit(0)
+	}
 
 	// Resolve auto mode
 	target := strings.ToLower(flagTarget)
