@@ -198,4 +198,40 @@ var (
 		},
 		DefaultConfiguration: &sarif.RuleConfiguration{Level: "warning"},
 	}
+
+	RulePRStale = sarif.Rule{
+		ID:   "GHSTATS005-PR-STALE",
+		Name: "StalePullRequestRisk",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "Pull request has remained open for an extended period, increasing merge conflict risk",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "Long-lived branches drift away from main, creating painful merge conflicts, latent integration defects, and prolonged lead time.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "warning"},
+	}
+
+	RulePRDiscussionChurn = sarif.Rule{
+		ID:   "GHSTATS006-PR-DISCUSSION-CHURN",
+		Name: "HighDiscussionFriction",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "High comment volume detected indicating design misalignment or review friction",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "PRs with excessive comment counts often signal unclear specifications or contentious architectural debates that benefit from real-time sync.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "note"},
+	}
+
+	RuleRepoAPIMetadata = sarif.Rule{
+		ID:   "GHSTATS104-REPO-API-METADATA",
+		Name: "GitHubRepositoryHealth",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "Repository GitHub ecosystem metrics (stars, issue backlog, activity)",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "Ecosystem overview retrieved via GitHub API reflecting project adoption and issue queue health.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "note"},
+	}
 )

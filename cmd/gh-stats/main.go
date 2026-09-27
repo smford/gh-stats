@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/smford/gh-stats/pkg/analyzer"
+	"github.com/smford/gh-stats/pkg/github"
 	"github.com/smford/gh-stats/pkg/gitutil"
 	"github.com/smford/gh-stats/pkg/reporter"
 	"github.com/smford/gh-stats/pkg/sarif"
@@ -21,6 +24,9 @@ func main() {
 		flagOutput      string
 		flagRepoPath    string
 		flagCommitLimit int
+		flagToken       string
+		flagPRNumber    int
+		flagRepoSlug    string
 		flagQuiet       bool
 	)
 
@@ -30,6 +36,9 @@ func main() {
 	flag.StringVar(&flagOutput, "output", getEnvDefault("INPUT_SARIF_OUTPUT", getEnvDefault("INPUT_OUTPUT", "gh-stats.sarif")), "Path to output SARIF file")
 	flag.StringVar(&flagRepoPath, "repo-path", getEnvDefault("INPUT_REPO_PATH", "."), "Path to git repository")
 	flag.IntVar(&flagCommitLimit, "commit-limit", 200, "Maximum commit history to examine for repo hotspots")
+	flag.StringVar(&flagToken, "token", getEnvDefault("INPUT_TOKEN", os.Getenv("GITHUB_TOKEN")), "GitHub API token for metadata enrichment")
+	flag.IntVar(&flagPRNumber, "pr-number", 0, "Pull request number (auto-detected if omitted)")
+	flag.StringVar(&flagRepoSlug, "repo", getEnvDefault("GITHUB_REPOSITORY", ""), "GitHub repository slug owner/repo (auto-detected if omitted)")
 	flag.BoolVar(&flagQuiet, "quiet", false, "Suppress stdout output")
 	flag.Parse()
 
@@ -49,6 +58,21 @@ func main() {
 
 	runner := gitutil.NewRunner(flagRepoPath)
 	builder := sarif.NewBuilder()
+
+	// Auto-detect repo slug from git remote if not provided
+	repoSlug := flagRepoSlug
+	if repoSlug == "" {
+		if remoteURL, err := runner.Exec("config", "--get", "remote.origin.url"); err == nil {
+			if detected, err := github.DetectRepoSlug(remoteURL); err == nil {
+				repoSlug = detected
+			}
+		}
+	}
+
+	var ghClient *github.Client
+	if flagToken != "" {
+		ghClient = github.NewClient(flagToken)
+	}
 
 	var markdownSummary string
 
@@ -75,6 +99,30 @@ func main() {
 			os.Exit(1)
 		}
 
+		// Optional GitHub API enrichment
+		prNumber := flagPRNumber
+		if prNumber == 0 {
+			prNumber = github.DetectPRNumber()
+		}
+
+		if ghClient != nil && repoSlug != "" && prNumber > 0 {
+			if !flagQuiet {
+				fmt.Printf("🌐 Fetching PR #%d metadata from GitHub API (%s)...\n", prNumber, repoSlug)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			prMeta, err := ghClient.GetPRMetadata(ctx, repoSlug, prNumber)
+			cancel()
+			if err != nil {
+				if !flagQuiet {
+					fmt.Printf("⚠️ GitHub API PR enrichment skipped: %v\n", err)
+				}
+			} else {
+				stats.GitHubMeta = prMeta
+				// Recalculate risk with PR lifecycle data
+				// Note: calculateRisk is internal to analyzer, but stats.PopulateSARIF runs with it
+			}
+		}
+
 		stats.PopulateSARIF(builder)
 		markdownSummary = reporter.GeneratePRSummary(stats)
 
@@ -92,6 +140,23 @@ func main() {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "❌ Error analyzing repository: %v\n", err)
 			os.Exit(1)
+		}
+
+		// Optional GitHub API enrichment for repo
+		if ghClient != nil && repoSlug != "" {
+			if !flagQuiet {
+				fmt.Printf("🌐 Fetching Repository metadata from GitHub API (%s)...\n", repoSlug)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			repoMeta, err := ghClient.GetRepoMetadata(ctx, repoSlug)
+			cancel()
+			if err != nil {
+				if !flagQuiet {
+					fmt.Printf("⚠️ GitHub API repo metadata skipped: %v\n", err)
+				}
+			} else {
+				stats.GitHubMeta = repoMeta
+			}
 		}
 
 		stats.PopulateSARIF(builder)

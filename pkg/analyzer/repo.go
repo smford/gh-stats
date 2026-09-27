@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/smford/gh-stats/pkg/github"
 	"github.com/smford/gh-stats/pkg/gitutil"
 	"github.com/smford/gh-stats/pkg/sarif"
 )
@@ -40,6 +41,8 @@ type RepoStats struct {
 	TopContributors     []AuthorEntry
 	TopAuthorPercentage float64
 	PrimaryFile         string
+	GitHubMeta          *github.RepoMetadata         // Optional GitHub API metadata
+	CommitActivity      []github.CommitActivityWeek  // Optional 52-week activity
 }
 
 // AnalyzeRepo analyzes the entire git repository.
@@ -141,6 +144,7 @@ func (stats *RepoStats) PopulateSARIF(builder *sarif.Builder) {
 	builder.AddRule(RuleRepoSummary)
 	builder.AddRule(RuleRepoHotspots)
 	builder.AddRule(RuleRepoBusFactor)
+	builder.AddRule(RuleRepoAPIMetadata)
 
 	// 1. Repo Summary
 	var sb strings.Builder
@@ -148,6 +152,11 @@ func (stats *RepoStats) PopulateSARIF(builder *sarif.Builder) {
 	sb.WriteString(fmt.Sprintf("- **Total Tracked Files:** %d\n", stats.TotalFiles))
 	sb.WriteString(fmt.Sprintf("- **Test Files:** %d (%.1f%% of codebase)\n", stats.TestFilesCount, stats.TestFileRatio))
 	sb.WriteString(fmt.Sprintf("- **Documentation Files:** %d\n", stats.DocFilesCount))
+
+	if stats.GitHubMeta != nil {
+		sb.WriteString(fmt.Sprintf("- **GitHub Ecosystem:** ⭐ %d stars | 🍴 %d forks | ❗ %d open issues/PRs\n",
+			stats.GitHubMeta.StargazersCount, stats.GitHubMeta.ForksCount, stats.GitHubMeta.OpenIssuesCount))
+	}
 
 	if len(stats.ExtensionBreakdown) > 0 {
 		sb.WriteString("\n**Top File Types:**\n")
@@ -219,6 +228,24 @@ func (stats *RepoStats) PopulateSARIF(builder *sarif.Builder) {
 			stats.PrimaryFile,
 			1,
 			map[string]any{"topAuthor": stats.TopContributors[0].Author, "percentage": stats.TopAuthorPercentage},
+		)
+	}
+
+	// 4. GitHub API Ecosystem Result (if available)
+	if stats.GitHubMeta != nil {
+		builder.AddResult(
+			RuleRepoAPIMetadata.ID,
+			"note",
+			fmt.Sprintf("GitHub Ecosystem: %d open issues, %d stars, %d forks", stats.GitHubMeta.OpenIssuesCount, stats.GitHubMeta.StargazersCount, stats.GitHubMeta.ForksCount),
+			fmt.Sprintf("### 🌐 GitHub Repository Metrics\n- **Open Issues / Backlog:** `%d`\n- **Stargazers:** `%d`\n- **Forks:** `%d`\n- **Default Branch:** `%s`\n",
+				stats.GitHubMeta.OpenIssuesCount, stats.GitHubMeta.StargazersCount, stats.GitHubMeta.ForksCount, stats.GitHubMeta.DefaultBranch),
+			stats.PrimaryFile,
+			1,
+			map[string]any{
+				"openIssues": stats.GitHubMeta.OpenIssuesCount,
+				"stars":      stats.GitHubMeta.StargazersCount,
+				"forks":      stats.GitHubMeta.ForksCount,
+			},
 		)
 	}
 }

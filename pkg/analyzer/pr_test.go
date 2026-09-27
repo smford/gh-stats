@@ -2,7 +2,9 @@ package analyzer
 
 import (
 	"testing"
+	"time"
 
+	"github.com/smford/gh-stats/pkg/github"
 	"github.com/smford/gh-stats/pkg/gitutil"
 	"github.com/smford/gh-stats/pkg/sarif"
 )
@@ -105,5 +107,39 @@ func TestPRStatsRiskCalculationAndSARIF(t *testing.T) {
 		if !foundRules[er] {
 			t.Errorf("expected rule %s in results, but was not found", er)
 		}
+	}
+}
+
+func TestPRStatsWithGitHubMetadata(t *testing.T) {
+	stats := &PRStats{
+		TotalAdditions: 50,
+		TotalDeletions: 10,
+		FilesChanged:   2,
+		CommitCount:    1,
+		PrimaryFile:    "main.go",
+		GitHubMeta: &github.PRMetadata{
+			Number:           99,
+			Age:              20 * 24 * time.Hour, // >14 days (stale)
+			TotalDiscussions: 25,                  // >15 discussions
+			ApprovalsCount:   1,
+			ReviewsCount:     3,
+		},
+	}
+
+	calculateRisk(stats)
+	builder := sarif.NewBuilder()
+	stats.PopulateSARIF(builder)
+
+	report := builder.Build()
+	foundRules := make(map[string]bool)
+	for _, res := range report.Runs[0].Results {
+		foundRules[res.RuleID] = true
+	}
+
+	if !foundRules[RulePRStale.ID] {
+		t.Errorf("expected %s in results for PR open >14 days", RulePRStale.ID)
+	}
+	if !foundRules[RulePRDiscussionChurn.ID] {
+		t.Errorf("expected %s in results for PR with >15 discussions", RulePRDiscussionChurn.ID)
 	}
 }

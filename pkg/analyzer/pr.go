@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/smford/gh-stats/pkg/github"
 	"github.com/smford/gh-stats/pkg/gitutil"
 	"github.com/smford/gh-stats/pkg/sarif"
 )
@@ -28,9 +30,10 @@ type PRStats struct {
 	TopChangedFiles    []gitutil.FileDiffStat
 	CommitCount        int
 	Commits            []gitutil.CommitInfo
-	RiskScore          int    // 0-100 (higher = riskier)
-	RiskLevel          string // "LOW", "MEDIUM", "HIGH", "CRITICAL"
-	PrimaryFile        string // representative file for PR-wide SARIF results
+	GitHubMeta         *github.PRMetadata // Optional enrichment from GitHub API
+	RiskScore          int                // 0-100 (higher = riskier)
+	RiskLevel          string             // "LOW", "MEDIUM", "HIGH", "CRITICAL"
+	PrimaryFile        string             // representative file for PR-wide SARIF results
 }
 
 // SensitiveMatch notes a sensitive file and its classification.
@@ -149,6 +152,16 @@ func calculateRisk(stats *PRStats) {
 		}
 	}
 
+	// 4. Lifecycle & Discussion penalties (from GitHub API if available)
+	if stats.GitHubMeta != nil {
+		if stats.GitHubMeta.Age > 14*24*time.Hour {
+			score += 15 // stale PR / branch drift
+		}
+		if stats.GitHubMeta.TotalDiscussions > 15 {
+			score += 10 // review friction / misalignment
+		}
+	}
+
 	if score < 0 {
 		score = 0
 	}
@@ -175,6 +188,8 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 	builder.AddRule(RulePRSize)
 	builder.AddRule(RulePRTestRatio)
 	builder.AddRule(RulePRBlastRadius)
+	builder.AddRule(RulePRStale)
+	builder.AddRule(RulePRDiscussionChurn)
 
 	totalLines := stats.TotalAdditions + stats.TotalDeletions
 
@@ -190,6 +205,14 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 	sb.WriteString(fmt.Sprintf("- **Volume:** +%d / -%d lines across **%d** files\n", stats.TotalAdditions, stats.TotalDeletions, stats.FilesChanged))
 	sb.WriteString(fmt.Sprintf("- **Test Ratio:** %d test lines added vs %d production lines added\n", stats.TestLinesAdded, stats.CodeLinesAdded))
 	sb.WriteString(fmt.Sprintf("- **Commits:** %d commit(s)\n", stats.CommitCount))
+
+	if stats.GitHubMeta != nil {
+		sb.WriteString(fmt.Sprintf("- **PR Lifecycle Age:** `%s` (Created: %s)\n", formatDuration(stats.GitHubMeta.Age), stats.GitHubMeta.CreatedAt.Format("2006-01-02 15:04 MST")))
+		if stats.GitHubMeta.TimeToFirstReview > 0 {
+			sb.WriteString(fmt.Sprintf("- **Time to First Review (TTFR):** `%s`\n", formatDuration(stats.GitHubMeta.TimeToFirstReview)))
+		}
+		sb.WriteString(fmt.Sprintf("- **Discussions & Reviews:** %d total discussions (%d approvals, %d reviews)\n", stats.GitHubMeta.TotalDiscussions, stats.GitHubMeta.ApprovalsCount, stats.GitHubMeta.ReviewsCount))
+	}
 
 	if len(stats.SensitiveFiles) > 0 {
 		sb.WriteString(fmt.Sprintf("\n⚠️ **Blast Radius (%d sensitive file(s) modified):**\n", len(stats.SensitiveFiles)))
@@ -221,6 +244,11 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 		"testLinesAdded": stats.TestLinesAdded,
 		"codeLinesAdded": stats.CodeLinesAdded,
 		"sensitiveCount": len(stats.SensitiveFiles),
+	}
+	if stats.GitHubMeta != nil {
+		props["prAgeHours"] = stats.GitHubMeta.Age.Hours()
+		props["totalDiscussions"] = stats.GitHubMeta.TotalDiscussions
+		props["approvalsCount"] = stats.GitHubMeta.ApprovalsCount
 	}
 
 	builder.AddResult(
@@ -271,6 +299,45 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 			map[string]any{"path": sf.Path, "category": sf.Category},
 		)
 	}
+
+	// 5. Stale PR Warning (if PR open > 14 days)
+	if stats.GitHubMeta != nil && stats.GitHubMeta.Age > 14*24*time.Hour {
+		builder.AddResult(
+			RulePRStale.ID,
+			"warning",
+			fmt.Sprintf("Stale PR detected: open for %s. SRE recommends rebasing frequently to reduce merge skew.", formatDuration(stats.GitHubMeta.Age)),
+			fmt.Sprintf("### ⚠️ Stale Pull Request Warning\nThis pull request has been open for **%s**.\nLong-lived branches drift from the primary trunk, significantly increasing integration conflict probability and deployment surprises.", formatDuration(stats.GitHubMeta.Age)),
+			stats.PrimaryFile,
+			1,
+			map[string]any{"ageHours": stats.GitHubMeta.Age.Hours()},
+		)
+	}
+
+	// 6. Discussion Churn / Review Friction
+	if stats.GitHubMeta != nil && stats.GitHubMeta.TotalDiscussions > 15 {
+		builder.AddResult(
+			RulePRDiscussionChurn.ID,
+			"note",
+			fmt.Sprintf("High review friction: %d comments across %d reviews.", stats.GitHubMeta.TotalDiscussions, stats.GitHubMeta.ReviewsCount),
+			fmt.Sprintf("### 💬 High Review Discussion Volume\nThis PR has accumulated **%d comments** across **%d reviews**.\nHigh discussion density often signals architectural ambiguity. Consider a synchronous huddle to unblock.", stats.GitHubMeta.TotalDiscussions, stats.GitHubMeta.ReviewsCount),
+			stats.PrimaryFile,
+			1,
+			map[string]any{"totalDiscussions": stats.GitHubMeta.TotalDiscussions, "reviews": stats.GitHubMeta.ReviewsCount},
+		)
+	}
+}
+
+func formatDuration(d time.Duration) string {
+	days := int(d.Hours() / 24)
+	hours := int(d.Hours()) % 24
+	mins := int(d.Minutes()) % 60
+	if days > 0 {
+		return fmt.Sprintf("%dd %dh", days, hours)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, mins)
+	}
+	return fmt.Sprintf("%dm", mins)
 }
 
 func min(a, b int) int {

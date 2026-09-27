@@ -65,6 +65,7 @@ runs:
         INPUT_HEAD_REF: ${{ inputs.head-ref }}
         INPUT_SARIF_OUTPUT: ${{ inputs.output }}
         INPUT_COMMIT_LIMIT: ${{ inputs.commit-limit }}
+        INPUT_TOKEN: ${{ inputs.token }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |
         go run "${{ github.action_path }}/cmd/gh-stats"

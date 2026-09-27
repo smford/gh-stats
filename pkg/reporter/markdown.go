@@ -61,6 +61,23 @@ func GeneratePRSummary(stats *analyzer.PRStats) string {
 		}
 	}
 
+	if stats.GitHubMeta != nil {
+		sb.WriteString("\n## ⏱️ PR Lifecycle & Review Velocity\n\n")
+		sb.WriteString("| Metric | Value |\n")
+		sb.WriteString("| :--- | :--- |\n")
+		days := int(stats.GitHubMeta.Age.Hours() / 24)
+		hours := int(stats.GitHubMeta.Age.Hours()) % 24
+		sb.WriteString(fmt.Sprintf("| **PR Age / Lead Time** | `%dd %dh` |\n", days, hours))
+		if stats.GitHubMeta.TimeToFirstReview > 0 {
+			ttfrHours := int(stats.GitHubMeta.TimeToFirstReview.Hours())
+			ttfrMins := int(stats.GitHubMeta.TimeToFirstReview.Minutes()) % 60
+			sb.WriteString(fmt.Sprintf("| **Time to First Review (TTFR)** | `%dh %dm` |\n", ttfrHours, ttfrMins))
+		}
+		sb.WriteString(fmt.Sprintf("| **Discussions & Comments** | `%d` total comments |\n", stats.GitHubMeta.TotalDiscussions))
+		sb.WriteString(fmt.Sprintf("| **Review Status** | `%d` approval(s) across `%d` review(s) |\n", stats.GitHubMeta.ApprovalsCount, stats.GitHubMeta.ReviewsCount))
+		sb.WriteString(fmt.Sprintf("| **Author Trust Tier** | `%s` |\n", stats.GitHubMeta.AuthorAssociation))
+	}
+
 	return sb.String()
 }
 
@@ -68,6 +85,16 @@ func GeneratePRSummary(stats *analyzer.PRStats) string {
 func GenerateRepoSummary(stats *analyzer.RepoStats) string {
 	var sb strings.Builder
 	sb.WriteString("# 🏛️ GitHub Stats: Repository Architecture Assessment\n\n")
+
+	if stats.GitHubMeta != nil {
+		sb.WriteString("## 🌐 GitHub Ecosystem\n\n")
+		sb.WriteString("| Metric | Value |\n")
+		sb.WriteString("| :--- | :--- |\n")
+		sb.WriteString(fmt.Sprintf("| **Open Issues & PRs** | `%d` |\n", stats.GitHubMeta.OpenIssuesCount))
+		sb.WriteString(fmt.Sprintf("| **Stargazers** | `%d` |\n", stats.GitHubMeta.StargazersCount))
+		sb.WriteString(fmt.Sprintf("| **Forks** | `%d` |\n", stats.GitHubMeta.ForksCount))
+		sb.WriteString(fmt.Sprintf("| **Default Branch** | `%s` |\n\n", stats.GitHubMeta.DefaultBranch))
+	}
 
 	sb.WriteString("## 📊 Codebase Composition\n\n")
 	sb.WriteString("| Metric | Value |\n")
