@@ -1,32 +1,17 @@
-name: Release
+name: "Release & Publish"
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
-    inputs:
-      bump:
-        description: 'SemVer bump type (auto-detected from conventional commits if set to auto)'
-        required: false
-        default: 'auto'
-        type: choice
-        options:
-          - auto
-          - patch
-          - minor
-          - major
-      custom_version:
-        description: 'Explicit SemVer version (e.g. v1.0.0). Overrides bump type.'
-        required: false
-        default: ''
-        type: string
 
 permissions:
   contents: write
 
 jobs:
   release:
-    name: Generate SemVer Release
+    name: "Semantic Version & Release"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -38,159 +23,106 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
-          cache: false
+          go-version-file: "go.mod"
+          cache: true
 
-      - name: Verify Quality & Run Tests
+      - name: Run Test Suite
         run: |
           go vet ./...
           go test -v -race ./...
 
-      - name: Calculate SemVer Version
+      - name: Calculate Semantic Version
         id: semver
-        shell: bash
         run: |
-          git fetch --tags --force
+          chmod +x scripts/bump-version.sh
+          ./scripts/bump-version.sh
 
-          # Find latest SemVer tag matching v*.*.*
-          LATEST_TAG=$(git tag -l "v[0-9]*.[0-9]*.[0-9]*" | sort -V | tail -n 1)
-          echo "Latest existing tag: ${LATEST_TAG:-none}"
-
-          # Avoid duplicate release if current commit is already tagged
-          if [ -n "$LATEST_TAG" ]; then
-            TAG_COMMIT=$(git rev-list -n 1 "$LATEST_TAG")
-            CURRENT_COMMIT=$(git rev-parse HEAD)
-            if [ "$TAG_COMMIT" = "$CURRENT_COMMIT" ]; then
-              echo "Commit $CURRENT_COMMIT is already tagged as $LATEST_TAG. Skipping release."
-              echo "skip_release=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          fi
-
-          CUSTOM="${{ github.event.inputs.custom_version }}"
-          BUMP="${{ github.event.inputs.bump }}"
-
-          if [ -n "$CUSTOM" ]; then
-            [[ "$CUSTOM" =~ ^v ]] || CUSTOM="v${CUSTOM}"
-            NEW_TAG="$CUSTOM"
-            TAG_NUM="${NEW_TAG#v}"
-            IFS="." read -r MAJOR MINOR PATCH <<< "$TAG_NUM"
-            MAJOR_TAG="v${MAJOR}"
-          elif [ -z "$LATEST_TAG" ]; then
-            # Initial release
-            COMMITS=$(git log HEAD --pretty=format:"%s%n%b")
-            if echo "$COMMITS" | grep -Eq "^[a-zA-Z]+(\([^\)]+\))?!:|BREAKING CHANGE:"; then
-              MAJOR=1; MINOR=0; PATCH=0
-            elif echo "$COMMITS" | grep -Eq "^feat(\([^\)]+\))?:"; then
-              MAJOR=0; MINOR=1; PATCH=0
-            else
-              MAJOR=0; MINOR=0; PATCH=1
-            fi
-            NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
-            MAJOR_TAG="v${MAJOR}"
-          else
-            # Increment from existing tag
-            TAG_NUM="${LATEST_TAG#v}"
-            IFS="." read -r MAJOR MINOR PATCH <<< "$TAG_NUM"
-            COMMITS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s%n%b")
-
-            if [ "$BUMP" = "major" ]; then
-              MAJOR=$((MAJOR + 1))
-              MINOR=0
-              PATCH=0
-            elif [ "$BUMP" = "minor" ]; then
-              MINOR=$((MINOR + 1))
-              PATCH=0
-            elif [ "$BUMP" = "patch" ]; then
-              PATCH=$((PATCH + 1))
-            else
-              # Auto-detect from conventional commit history
-              if echo "$COMMITS" | grep -Eq "^[a-zA-Z]+(\([^\)]+\))?!:|BREAKING CHANGE:"; then
-                MAJOR=$((MAJOR + 1))
-                MINOR=0
-                PATCH=0
-              elif echo "$COMMITS" | grep -Eq "^feat(\([^\)]+\))?:"; then
-                MINOR=$((MINOR + 1))
-                PATCH=0
-              else
-                PATCH=$((PATCH + 1))
-              fi
-            fi
-
-            NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
-            MAJOR_TAG="v${MAJOR}"
-          fi
-
-          echo "Computed new SemVer tag: $NEW_TAG (floating major: $MAJOR_TAG)"
-          echo "new_tag=${NEW_TAG}" >> "$GITHUB_OUTPUT"
-          echo "major_tag=${MAJOR_TAG}" >> "$GITHUB_OUTPUT"
-          echo "skip_release=false" >> "$GITHUB_OUTPUT"
-
-      - name: Build Cross-Platform CLI Binaries
-        if: steps.semver.outputs.skip_release != 'true'
-        shell: bash
-        env:
-          NEW_TAG: ${{ steps.semver.outputs.new_tag }}
+      - name: Check If Code Changes Require Release
+        if: steps.semver.outputs.is_new_version != 'true'
         run: |
-          mkdir -p dist
-          platforms=(
-            "linux/amd64"
-            "linux/arm64"
-            "darwin/amd64"
-            "darwin/arm64"
-            "windows/amd64"
-          )
+          echo "No code changes detected in cmd/, pkg/, go.mod/sum, or action.yml since last release. Skipping release."
 
-          for p in "${platforms[@]}"; do
-            os="${p%/*}"
-            arch="${p#*/}"
-            ext=""
-            if [ "$os" = "windows" ]; then
-              ext=".exe"
-            fi
-            output_name="dist/gh-stats-${NEW_TAG}-${os}-${arch}${ext}"
-            echo "🔨 Compiling ${output_name}..."
-            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build \
-              -ldflags="-s -w -X main.version=${NEW_TAG}" \
-              -o "$output_name" ./cmd/gh-stats
-          done
+      - name: Configure Git User
+        if: steps.semver.outputs.is_new_version == 'true'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          cd dist
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum gh-stats-* > checksums.txt
-          else
-            shasum -a 256 gh-stats-* > checksums.txt
-          fi
-          cd ..
-
-      - name: Create and Push Git Tags
-        if: steps.semver.outputs.skip_release != 'true'
-        shell: bash
+      - name: Tag Release & Update Major Tag
+        if: steps.semver.outputs.is_new_version == 'true'
         env:
-          NEW_TAG: ${{ steps.semver.outputs.new_tag }}
+          NEW_TAG: ${{ steps.semver.outputs.version }}
           MAJOR_TAG: ${{ steps.semver.outputs.major_tag }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          echo "Tagging ${NEW_TAG}..."
+          echo "Tagging release: ${NEW_TAG}"
           git tag -a "${NEW_TAG}" -m "Release ${NEW_TAG}"
-
-          echo "Updating floating major tag ${MAJOR_TAG}..."
-          git tag -fa "${MAJOR_TAG}" -m "Update ${MAJOR_TAG} to ${NEW_TAG}"
-
           git push origin "${NEW_TAG}"
-          git push origin "${MAJOR_TAG}" --force
+
+          if [ -n "${MAJOR_TAG}" ]; then
+            echo "Updating floating major tag: ${MAJOR_TAG}"
+            git tag -fa "${MAJOR_TAG}" -m "Update ${MAJOR_TAG} to ${NEW_TAG}"
+            git push origin "${MAJOR_TAG}" --force
+          fi
+
+      - name: Build Cross-Platform Release Assets
+        if: steps.semver.outputs.is_new_version == 'true'
+        env:
+          VERSION: ${{ steps.semver.outputs.version }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          chmod +x scripts/build-release.sh
+          ./scripts/build-release.sh "${VERSION}" "${COMMIT_SHA:0:7}"
 
       - name: Publish GitHub Release
-        if: steps.semver.outputs.skip_release != 'true'
-        shell: bash
+        if: steps.semver.outputs.is_new_version == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEW_TAG: ${{ steps.semver.outputs.new_tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.semver.outputs.version }}
         run: |
-          echo "🚀 Publishing GitHub Release ${NEW_TAG}..."
-          gh release create "${NEW_TAG}" \
-            dist/* \
-            --title "Release ${NEW_TAG}" \
+          gh release create "${VERSION}" dist/* \
+            --title "gh-stats ${VERSION}" \
             --generate-notes
+
+      - name: Generate and Publish Homebrew Formula
+        if: steps.semver.outputs.is_new_version == 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN || secrets.HOMEBREW_TAP_TOKEN }}
+          TAG_NAME: ${{ steps.semver.outputs.version }}
+          VERSION: ${{ steps.semver.outputs.version_number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x scripts/generate_formula.sh
+          ./scripts/generate_formula.sh "$VERSION" "$TAG_NAME" "dist" "Formula/gh-stats.rb"
+
+          # Upload formula asset to GitHub release
+          gh release upload "$TAG_NAME" Formula/gh-stats.rb --clobber
+
+          # Commit updated formula to gh-stats repository
+          git add Formula/gh-stats.rb
+          git commit -m "chore(formula): update Homebrew formula to ${TAG_NAME} [skip ci]" || true
+          git push origin main || true
+
+          # Publish to smford/homebrew-tap if HOMEBREW_TAP_GITHUB_TOKEN is configured
+          if [ -n "${TAP_TOKEN}" ]; then
+            echo "Publishing updated formula to smford/homebrew-tap..."
+            git clone "https://x-access-token:${TAP_TOKEN}@github.com/smford/homebrew-tap.git" tap_repo
+            mkdir -p tap_repo/Formula
+            cp Formula/gh-stats.rb tap_repo/Formula/gh-stats.rb
+            cd tap_repo
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add Formula/gh-stats.rb
+            if git diff --staged --quiet; then
+              echo "Formula in tap is already up to date"
+            else
+              git commit -m "feat(formula): update gh-stats to ${TAG_NAME}"
+              git push "https://x-access-token:${TAP_TOKEN}@github.com/smford/homebrew-tap.git" main
+              echo "Successfully pushed formula update to smford/homebrew-tap"
+            fi
+            cd ..
+            rm -rf tap_repo
+          else
+            echo "::warning::HOMEBREW_TAP_GITHUB_TOKEN secret is not set or is empty."
+            echo "::warning::The formula was NOT pushed to smford/homebrew-tap."
+            echo "::warning::Add the HOMEBREW_TAP_GITHUB_TOKEN secret in GitHub repo Settings > Secrets and variables > Actions."
+          fi
