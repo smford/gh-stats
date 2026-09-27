@@ -1,0 +1,66 @@
+name: Publish GitHub Release Notes (Manual Demo)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to update notes for (e.g. "v0.6.0"; leave empty to auto-detect latest release tag)'
+        required: false
+        default: ''
+      base_ref:
+        description: 'Base git reference for comparison delta (e.g. "v0.5.0"; leave empty to auto-detect previous tag)'
+        required: false
+        default: ''
+      head_ref:
+        description: 'Head git reference for comparison delta (defaults to HEAD or target release tag)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write       # Required to create or update GitHub Releases via API
+  security-events: write # Required to publish SARIF code scanning reports
+
+jobs:
+  publish-notes:
+    name: Generate & Publish SRE Release Notes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gh-stats and Publish Release Notes
+        id: release-stats
+        uses: ./
+        with:
+          target: release
+          publish-release-notes: 'true'
+          release-tag: ${{ inputs.release_tag }}
+          base-ref: ${{ inputs.base_ref }}
+          head-ref: ${{ inputs.head_ref }}
+          output: release-sre.sarif
+          upload-sarif: 'true'
+          category: 'gh-stats-release-notes'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify Published Release Output
+        run: |
+          echo "=========================================="
+          echo "🚀 gh-stats Release Notes Publication Demo"
+          echo "=========================================="
+          echo "Release ID:         ${{ steps.release-stats.outputs.release-id }}"
+          echo "Release URL:        ${{ steps.release-stats.outputs.release-url }}"
+          echo "Target Mode:        ${{ steps.release-stats.outputs.target }}"
+          echo "Comparison Base:    ${{ steps.release-stats.outputs.release-base-ref }}"
+          echo "Comparison Head:    ${{ steps.release-stats.outputs.release-head-ref }}"
+          echo "Commits in Release: ${{ steps.release-stats.outputs.release-commits-count }}"
+          echo "Breaking Changes:   ${{ steps.release-stats.outputs.release-breaking-count }}"
+          echo "Risk Level:         ${{ steps.release-stats.outputs.release-risk-level }}"
+          echo "Risk Score:         ${{ steps.release-stats.outputs.release-risk-score }}/100"
+          echo "Suggested Bump:     ${{ steps.release-stats.outputs.suggested-bump }}"
+          echo "Suggested Version:  ${{ steps.release-stats.outputs.suggested-version }}"
+          echo "=========================================="
+          if [ -n "${{ steps.release-stats.outputs.release-url }}" ]; then
+            echo "✅ Release notes live at: ${{ steps.release-stats.outputs.release-url }}"
+          fi

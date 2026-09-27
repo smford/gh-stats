@@ -5,28 +5,28 @@
 class GhStats < Formula
   desc "SRE & developer reliability statistics for GitHub PRs and repositories"
   homepage "https://github.com/smford/gh-stats"
-  version "0.6.0"
+  version "0.7.0"
   license "MIT"
 
   on_macos do
     on_arm do
       url "https://github.com/smford/gh-stats/releases/download/v#{version}/gh-stats_#{version}_darwin_arm64.tar.gz"
-      sha256 "e9b71fc35af2a65f26ffbd364f0be18bdba404beee4a0deb296f020d5c2642f0"
+      sha256 "57f078b7eb498d6c2103b29106c3f833cfb849efe577e58793777f74cb991f2d"
     end
     on_intel do
       url "https://github.com/smford/gh-stats/releases/download/v#{version}/gh-stats_#{version}_darwin_amd64.tar.gz"
-      sha256 "dafa71859e5b2a8f735b435b11660420710d11222b3587e7d9c3320f197701c1"
+      sha256 "bd707f745a02c98e578e5b6c90baee6c359456204d020bec42b02d8c7aa23101"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/smford/gh-stats/releases/download/v#{version}/gh-stats_#{version}_linux_arm64.tar.gz"
-      sha256 "48f09ed3f5004c4b61584378b4e26744b5ce5f2174a615cdece87ed22f4f8462"
+      sha256 "37e53cca04fb8a7cc14c4950543adcd0593be43b82e171f7d9400e04acc5496b"
     end
     on_intel do
       url "https://github.com/smford/gh-stats/releases/download/v#{version}/gh-stats_#{version}_linux_amd64.tar.gz"
-      sha256 "d6bdb5509d87cf1439aa4416e67dd1778ef9956113ce7d6044d8860d474ea537"
+      sha256 "92235dffab91f501ed360969ce45ea9e472acb75043639a1c8755abfa473fc61"
     end
   end
 

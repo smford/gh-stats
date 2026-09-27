@@ -561,6 +561,60 @@ gh-stats --target=drift --base=origin/production --head=origin/staging --fail-on
 
 ---
 
+## 🚀 Automated GitHub Release Notes Publishing (`--publish-release-notes`)
+
+Automatically generate and publish production-grade GitHub Release notes directly to GitHub Releases using the GitHub REST API (`POST /repos/{owner}/{repo}/releases` or `PATCH /repos/{owner}/{repo}/releases/{id}`):
+
+- **SRE Deployment Readiness:** Publishes overall release risk level, risk score, and quality gate results.
+- **Categorized Changelog:** Groups commits by Conventional Commits (Features 🚀, Bug Fixes 🐛, Performance ⚡, Refactoring 🛠️) with author mentions.
+- **Breaking Changes & Migrations Warning:** Highlights breaking changes syntax and database schema modifications (`*.sql`, `migrations/`).
+- **Blast Radius Isolation:** Identifies changes to CI/CD workflows, infrastructure manifests (Terraform, Kubernetes), and authentication modules.
+- **Release Contributor Roster:** Acknowledges all contributors to the release with commit counts and contribution share.
+- **Non-Destructive Updating:** If a release already exists (e.g. created during tag publishing or asset uploads), `gh-stats` preserves existing custom notes and binary asset download links while updating the SRE summary section.
+
+### CLI Usage:
+
+```bash
+# Auto-detect latest release tag and publish/update notes
+gh-stats --publish-release-notes --token="$GITHUB_TOKEN"
+
+# Publish notes for a specific release tag
+gh-stats --target=release --release-tag=v0.6.0 --publish-release-notes --token="$GITHUB_TOKEN"
+```
+
+### GitHub Actions Release Workflow:
+
+```yaml
+name: Release & Publish
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release-notes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Publish SRE Release Notes
+        uses: smford/gh-stats@main
+        with:
+          target: release
+          publish-release-notes: 'true'
+          release-tag: ${{ github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+---
+
 ## 💻 Local CLI Usage
 
 You can build and run `gh-stats` locally on any git repository:

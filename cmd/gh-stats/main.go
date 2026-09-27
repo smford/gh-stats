@@ -45,10 +45,12 @@ func main() {
 		flagExportJSON    string
 		flagExportWebhook string
 		flagWebhookSecret string
-		flagMaxCILatency  int
-		flagFailOnFlaky   bool
-		flagCheckRuns     bool
-		flagSuggestBump   bool
+		flagMaxCILatency        int
+		flagFailOnFlaky         bool
+		flagCheckRuns           bool
+		flagSuggestBump         bool
+		flagPublishReleaseNotes bool
+		flagReleaseTag          string
 	)
 
 	flag.StringVar(&flagTarget, "target", getEnvDefault("INPUT_TARGET", getEnvDefault("INPUT_MODE", "auto")), "Target scope: 'pr', 'repo', 'release'/'range', 'drift', or 'auto'")
@@ -70,6 +72,8 @@ func main() {
 	flag.BoolVar(&flagFailOnFlaky, "fail-on-flaky", getEnvDefault("INPUT_FAIL_ON_FLAKY", "false") == "true", "Fail quality gate if flaky CI checks are detected")
 	flag.BoolVar(&flagCheckRuns, "check-runs", true, "Fetch CI check runs for latency and flakiness analysis")
 	flag.BoolVar(&flagSuggestBump, "suggest-bump", getEnvDefault("INPUT_SUGGEST_BUMP", "false") == "true", "Deterministically recommend next semantic version bump and version string")
+	flag.BoolVar(&flagPublishReleaseNotes, "publish-release-notes", getEnvDefault("INPUT_PUBLISH_RELEASE_NOTES", "false") == "true", "Publish or update GitHub release notes with generated SRE summary")
+	flag.StringVar(&flagReleaseTag, "release-tag", getEnvDefault("INPUT_RELEASE_TAG", ""), "GitHub Release tag to publish or update notes for (auto-detected if omitted)")
 	flag.BoolVar(&flagQuiet, "quiet", false, "Suppress stdout output")
 	flag.BoolVar(&flagVersion, "version", false, "Print gh-stats version and exit")
 	flag.Parse()
@@ -82,7 +86,7 @@ func main() {
 	// Resolve auto mode
 	target := strings.ToLower(flagTarget)
 	if target == "auto" {
-		if flagSuggestBump {
+		if flagSuggestBump || flagPublishReleaseNotes {
 			target = "release"
 		} else if os.Getenv("GITHUB_EVENT_NAME") == "pull_request" || os.Getenv("GITHUB_BASE_REF") != "" {
 			target = "pr"
@@ -354,6 +358,52 @@ func main() {
 
 		stats.PopulateSARIF(builder)
 		markdownSummary = reporter.GenerateReleaseSummary(stats)
+
+		// Optional Publish/Update Release Notes on GitHub
+		if flagPublishReleaseNotes {
+			if ghClient == nil || repoSlug == "" {
+				if !flagQuiet {
+					fmt.Fprintf(os.Stderr, "⚠️ Cannot publish release notes: GitHub token or repository slug missing\n")
+				}
+			} else {
+				targetTag := flagReleaseTag
+				if targetTag == "" {
+					// Auto-detect release tag
+					if os.Getenv("GITHUB_REF_TYPE") == "tag" && os.Getenv("GITHUB_REF_NAME") != "" {
+						targetTag = os.Getenv("GITHUB_REF_NAME")
+					} else if strings.HasPrefix(os.Getenv("GITHUB_REF"), "refs/tags/") {
+						targetTag = strings.TrimPrefix(os.Getenv("GITHUB_REF"), "refs/tags/")
+					} else if gitutil.IsSemverTag(headRef) {
+						targetTag = headRef
+					} else if stats.SuggestedVersion != "" && stats.SuggestedVersion != "none" {
+						targetTag = stats.SuggestedVersion
+					} else if lt, err := runner.GetLatestTag(); err == nil && lt != "" {
+						targetTag = lt
+					}
+				}
+
+				if targetTag == "" {
+					fmt.Fprintf(os.Stderr, "⚠️ Cannot publish release notes: unable to auto-detect release tag. Please specify --release-tag=vX.Y.Z\n")
+				} else {
+					if !flagQuiet {
+						fmt.Printf("🚀 Publishing/updating release notes for [%s] on %s...\n", targetTag, repoSlug)
+					}
+					releaseTitle := fmt.Sprintf("gh-stats %s", targetTag)
+					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+					rel, err := ghClient.PublishOrUpdateReleaseNotes(ctx, repoSlug, targetTag, releaseTitle, markdownSummary)
+					cancel()
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "❌ Failed to publish release notes: %v\n", err)
+					} else if rel != nil {
+						setGithubOutput("release-id", fmt.Sprintf("%d", rel.ID))
+						setGithubOutput("release-url", rel.HTMLURL)
+						if !flagQuiet {
+							fmt.Printf("✅ Release notes successfully published for %s: %s\n", targetTag, rel.HTMLURL)
+						}
+					}
+				}
+			}
+		}
 
 		if !flagQuiet {
 			fmt.Printf("✅ Release Analysis Complete: Risk=%s (%d/100), Commits=%d, Breaking Changes=%d, Files=%d, Additions=+%d, Deletions=-%d\n",
