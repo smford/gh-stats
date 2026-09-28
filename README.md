@@ -770,6 +770,46 @@ gh-stats --target=pr --base=main --fail-on-risk-budget
 
 ---
 
+## 🖥️ Interactive Terminal UI Dashboard (`gh-stats tui`)
+
+Elevate local developer experience when reviewing branches or preparing pull requests. `gh-stats` features a built-in, zero-dependency **Terminal UI (TUI)** dashboard that presents comprehensive SRE health metrics right in your terminal:
+
+```bash
+# Launch interactive TUI for current branch against base branch
+gh-stats tui
+
+# Launch TUI comparing feature branch against origin/main
+gh-stats tui --base=origin/main --head=HEAD
+
+# Launch TUI in release comparison mode
+gh-stats tui --target=release
+
+# Launch TUI using the --tui flag
+gh-stats --tui
+```
+
+### Dashboard Views & Tabs:
+- **1. SRE Risk Overview (`[1]`):** High-impact SRE Risk Rating card, visual risk gauge meter (`[████████░░░░] 65/100`), change volume metrics, test-to-code velocity, and complete SRE score factor breakdown.
+- **2. Files & Blast Radius (`[2]`):** Scrollable list of modified files with additions/deletions, sensitive blast radius highlights (`[CI/CD Pipelines]`, `[Database Migrations]`, `[Security]`), and selected file details pane.
+- **3. Commits & Changelog (`[3]`):** Scrollable commit history with Conventional Commit badges (`[FEAT]`, `[FIX]`, `[BREAKING]`, `[PERF]`), author attributions, and selected commit preview pane.
+- **4. Domain Reviewers (`[4]`):** Domain expert reviewer routing derived from historical commit logs of the modified components to mitigate review fatigue.
+- **Non-Interactive Graceful Fallback:** When executed in non-interactive environments (CI runners, pipes, or background redirects `[ ! -t 1 ]`), `gh-stats tui` automatically falls back to clean, structured plain-text output.
+
+### TUI Keyboard Controls & Navigation:
+
+| Key | Action |
+| :--- | :--- |
+| `1`, `2`, `3`, `4` | Jump directly to Tab (1:Overview, 2:Files, 3:Commits, 4:Reviewers) |
+| `Tab` / `Shift+Tab` | Cycle forward / backward through tabs |
+| `h` / `l` or `←` / `→` | Switch left / right tabs |
+| `j` / `k` or `↑` / `↓` | Move cursor down / up in active lists |
+| `PgDown` / `PgUp` / `Space` | Scroll page down / page up |
+| `g` / `G` | Jump to top / bottom of active list |
+| `?` | Toggle Help overlay modal |
+| `q` / `Esc` / `Ctrl+C` | Exit dashboard |
+
+---
+
 ## 💻 Local CLI Usage
 
 You can build and run `gh-stats` locally on any git repository:
@@ -858,6 +898,8 @@ gh-stats -version
         Maximum allowed CRITICAL PRs in rolling window (overrides config)
   -fail-on-risk-budget
         Fail quality gate if squad risk budget is exceeded
+  -tui
+        Launch interactive Terminal UI (TUI) dashboard
   -version
         Print gh-stats version and exit
   -quiet

@@ -17,6 +17,7 @@ import (
 	"github.com/smford/gh-stats/pkg/hook"
 	"github.com/smford/gh-stats/pkg/reporter"
 	"github.com/smford/gh-stats/pkg/sarif"
+	"github.com/smford/gh-stats/pkg/tui"
 )
 
 var version = "dev"
@@ -25,6 +26,12 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "hook" {
 		handleHookCommand(os.Args[2:])
 		return
+	}
+
+	isTUISubcommand := false
+	if len(os.Args) > 1 && os.Args[1] == "tui" {
+		isTUISubcommand = true
+		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
 	}
 
 	var (
@@ -58,6 +65,7 @@ func main() {
 		flagSuggestBump         bool
 		flagPublishReleaseNotes bool
 		flagReleaseTag          string
+		flagTUI                 bool
 	)
 
 	flag.StringVar(&flagTarget, "target", getEnvDefault("INPUT_TARGET", getEnvDefault("INPUT_MODE", "auto")), "Target scope: 'pr', 'repo', 'release'/'range', 'drift', or 'auto'")
@@ -88,9 +96,14 @@ func main() {
 	flag.BoolVar(&flagSuggestBump, "suggest-bump", getEnvDefault("INPUT_SUGGEST_BUMP", "false") == "true", "Deterministically recommend next semantic version bump and version string")
 	flag.BoolVar(&flagPublishReleaseNotes, "publish-release-notes", getEnvDefault("INPUT_PUBLISH_RELEASE_NOTES", "false") == "true", "Publish or update GitHub release notes with generated SRE summary")
 	flag.StringVar(&flagReleaseTag, "release-tag", getEnvDefault("INPUT_RELEASE_TAG", ""), "GitHub Release tag to publish or update notes for (auto-detected if omitted)")
+	flag.BoolVar(&flagTUI, "tui", false, "Launch interactive Terminal UI (TUI) dashboard")
 	flag.BoolVar(&flagQuiet, "quiet", false, "Suppress stdout output")
 	flag.BoolVar(&flagVersion, "version", false, "Print gh-stats version and exit")
 	flag.Parse()
+
+	if isTUISubcommand {
+		flagTUI = true
+	}
 
 	if flagVersion {
 		fmt.Printf("gh-stats version %s\n", version)
@@ -100,7 +113,9 @@ func main() {
 	// Resolve auto mode
 	target := strings.ToLower(flagTarget)
 	if target == "auto" {
-		if flagSuggestBump || flagPublishReleaseNotes {
+		if flagTUI {
+			target = "pr"
+		} else if flagSuggestBump || flagPublishReleaseNotes {
 			target = "release"
 		} else if os.Getenv("GITHUB_EVENT_NAME") == "pull_request" || os.Getenv("GITHUB_BASE_REF") != "" {
 			target = "pr"
@@ -112,6 +127,10 @@ func main() {
 	}
 	if target == "range" {
 		target = "release"
+	}
+
+	if flagTUI && tui.IsInteractive() {
+		flagQuiet = true
 	}
 
 	if !flagQuiet {
@@ -703,6 +722,21 @@ func main() {
 					fmt.Println("✅ OpenTelemetry metrics dispatched successfully")
 				}
 				setGithubOutput("otel-status", "success")
+			}
+		}
+	}
+
+	// Launch interactive Terminal UI (TUI) dashboard if requested
+	if flagTUI {
+		var model *tui.DashboardModel
+		if prStats != nil {
+			model = tui.NewPRDashboardModel(prStats)
+		} else if releaseStats != nil {
+			model = tui.NewReleaseDashboardModel(releaseStats)
+		}
+		if model != nil {
+			if err := tui.Run(model, os.Stdin, os.Stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️ Error running TUI: %v\n", err)
 			}
 		}
 	}
