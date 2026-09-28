@@ -3,7 +3,7 @@ feat: native OpenTelemetry (OTel) and Prometheus metric export capabilities
 ## Summary
 This PR adds native OpenTelemetry (OTel) and Prometheus metric export capabilities to `gh-stats`, enabling engineering organizations to export PR, Release, Repository, and Environment Drift reliability metrics directly into modern observability platforms (Grafana, Mimir, Datadog, Prometheus Pushgateway, and OTel Collectors).
 
-All metric exposition logic is built using the Go standard library with zero external dependencies, maintaining sub-second execution speeds and lean binary distribution.
+All metric exposition logic is built using the Go standard library with zero external dependencies, maintaining sub-second execution speeds and lean binary distribution. In addition, the GitHub Pages documentation and feature showcases have been comprehensively updated.
 
 ### Key Capabilities
 1. Prometheus Text Exposition Format (`--export-prom=metrics.prom`):
@@ -22,7 +22,13 @@ All metric exposition logic is built using the Go standard library with zero ext
 4. Observability Documentation & Guide:
 - Expanded `README.md` with Grafana / Prometheus / Pushgateway, OpenTelemetry Collector, and Datadog ingestion examples.
 - Added metric reference table and updated CLI flags list.
-5. Example Workflow:
+5. GitHub Pages Documentation & Features Site:
+- Updated `docs/index.html` navigation with direct anchor links to Drift Audit and Observability sections.
+- Added feature showcase cards for Native OTel & Prometheus Exporter, Environment Drift & Promotion Audit, Deterministic SemVer Bump, and Automated Release Notes Publishing.
+- Added interactive demo preview tabs for Prometheus & OTel Metrics and Environment Drift Audit.
+- Added dedicated documentation sections for `#drift-mode` and `#observability`.
+- Added SARIF rules `GHSTATS301` through `GHSTATS304` to the searchable rules reference table.
+6. Example Workflow:
 - Added `.github/workflows/test-metric-export.yml` supporting manual dispatch and artifact archiving.
 
 ## Changes
@@ -35,6 +41,7 @@ All metric exposition logic is built using the Go standard library with zero ext
 - `cmd/gh-stats/main.go`: Added CLI flags `--export-prom`, `--export-otel-endpoint`, `--export-otel-headers`, config resolution, export execution, and GitHub Action step outputs.
 - `action.yml`: Exposed `export-prom`, `export-otel-endpoint`, and `export-otel-headers` inputs, and `metrics-prom` and `otel-status` outputs.
 - `README.md`: Added documentation for Prometheus and OpenTelemetry exporters, ingestion examples for Prometheus/Pushgateway, Grafana Cloud, and Datadog, updated configuration examples, and CLI flags list.
+- `docs/index.html`: Added Observability and Drift Audit feature cards, interactive tabs, documentation sections, navigation links, and SARIF rules reference entries.
 - `.github/workflows/test-metric-export.yml`: Added manual demonstration workflow for metric export.
 
 ## Verification

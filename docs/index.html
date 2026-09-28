@@ -32,6 +32,8 @@
         <li><a href="#features">Features</a></li>
         <li><a href="#playground">Interactive Demo</a></li>
         <li><a href="#release-mode">Release Comparison</a></li>
+        <li><a href="#drift-mode">Drift Audit</a></li>
+        <li><a href="#observability">Observability & OTel</a></li>
         <li><a href="#quickstart">Quickstart</a></li>
         <li><a href="#rules">SARIF Rules</a></li>
       </ul>
@@ -127,6 +129,34 @@
         </div>
 
         <div class="card">
+          <div class="card-icon">📈</div>
+          <h3>Native OTel & Prometheus Exporter</h3>
+          <p>Dispatches standard Prometheus text exposition format metrics (<code>.prom</code>) and OpenTelemetry OTLP HTTP JSON payloads directly to Grafana, Datadog, and OTel collectors with zero external dependencies.</p>
+          <span class="card-tag">Prometheus & OTel</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🌐</div>
+          <h3>Environment Drift & Promotion Audit</h3>
+          <p>Compares promotion environments (<code>--target=drift</code>), evaluating ahead/behind commits, unpromoted database migrations, high blast radius files, and promotion deployment risk.</p>
+          <span class="card-tag">--target=drift</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🏷️</div>
+          <h3>Deterministic SemVer Bump</h3>
+          <p>Inspects breaking changes (<code>feat!:</code>, SQL migrations) and feature commits to compute the recommended Semantic Version bump (<code>MAJOR</code>, <code>MINOR</code>, <code>PATCH</code>) and next tag.</p>
+          <span class="card-tag">--suggest-bump</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🚀</div>
+          <h3>Automated GitHub Release Notes</h3>
+          <p>Publishes or updates GitHub Releases via the GitHub API with structured SRE deployment summaries, categorized changelog, breaking change warnings, and contributor rosters.</p>
+          <span class="card-tag">--publish-release-notes</span>
+        </div>
+
+        <div class="card">
           <div class="card-icon">📊</div>
           <h3>DORA Telemetry Exporter</h3>
           <p>Dispatches structured DORA metrics (lead time, risk score, flakiness, test ratio) to JSON files or observability webhooks with HMAC-SHA256 signatures.</p>
@@ -168,6 +198,8 @@
       <div class="tabs-nav">
         <button class="tab-btn active" data-tab="tab-pr">Pull Request Risk Simulator</button>
         <button class="tab-btn" data-tab="tab-release">Release Comparison Preview</button>
+        <button class="tab-btn" data-tab="tab-drift">Environment Drift Audit</button>
+        <button class="tab-btn" data-tab="tab-prom">Prometheus & OTel Metrics</button>
         <button class="tab-btn" data-tab="tab-ci">CI Pipeline Latency & Flakiness</button>
         <button class="tab-btn" data-tab="tab-hook">Shift-Left Pre-Push Hook</button>
       </div>
@@ -341,6 +373,86 @@
           </div>
         </div>
       </div>
+
+      <!-- Tab 5: Environment Drift Audit -->
+      <div id="tab-drift" class="tab-content">
+        <div class="terminal-window">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot-red"></span>
+              <span class="dot-yellow"></span>
+              <span class="dot-green"></span>
+            </div>
+            <span class="terminal-title">gh-stats --target=drift --base=origin/production --head=origin/staging</span>
+            <span></span>
+          </div>
+          <div class="terminal-body">
+<pre><code><span style="color: #38bdf8;">$ gh-stats --target=drift --base=origin/production --head=origin/staging</span>
+🔍 gh-stats: running in [DRIFT] mode
+🌐 Auditing Environment Drift: origin/production (target) ➔ origin/staging (candidate)
+✅ Drift Audit Complete: Promotion Risk=CRITICAL (100/100), Commits Ahead=4, Commits Behind=1, Files=3
+
+<span style="color: #10b981;"># 🌐 Environment Drift & Promotion Assessment</span>
+> **Promotion Deployment Risk:** `CRITICAL` (Score: **100 / 100**) 🛡️
+
+## 🌐 Environment Drift & Promotion Assessment
+| Metric | Target / Environment | Status |
+| :--- | :--- | :--- |
+| **Base Environment (Target)** | `origin/production` | Target Base |
+| **Head Environment (Candidate)** | `origin/staging` | Promotion Source |
+| **Commits Ahead (Unpromoted)** | `4` commit(s) awaiting promotion | ℹ️ Pending Promotion |
+| **Commits Behind (Divergence)** | `1` commit(s) missing from candidate | ℹ️ Pending Promotion |
+| **Lines Added / Deleted** | `+4` / `-0` (Net: `+4`) | Unpromoted delta |
+
+## ⚠️ Unpromoted Breaking Changes & Migrations
+| Commit / Item | Description | Type |
+| :--- | :--- | :--- |
+| Schema | Database Migration: migrations/001_accounts.sql (+1/-0) | `migration_file` |
+| `7b0599d` | feat(api)!: breaking api v2 contract modification | `conventional_commit` |
+
+<span style="color: #ef4444; font-weight: bold;">❌ Quality Gate Failed: Environment drift promotion risk level [CRITICAL] meets or exceeds fail-on threshold [HIGH]</span></code></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 6: Prometheus & OpenTelemetry Export -->
+      <div id="tab-prom" class="tab-content">
+        <div class="terminal-window">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot-red"></span>
+              <span class="dot-yellow"></span>
+              <span class="dot-green"></span>
+            </div>
+            <span class="terminal-title">Emitted Prometheus & OpenTelemetry Telemetry</span>
+            <span></span>
+          </div>
+          <div class="terminal-body">
+<pre><code><span style="color: #38bdf8;">$ gh-stats --target=pr --export-prom=metrics.prom --export-otel-endpoint=http://otel-collector:4318/v1/metrics</span>
+🔍 gh-stats: running in [PR] mode
+📈 Prometheus metrics exported to: metrics.prom
+📡 Dispatching OpenTelemetry metrics to: http://otel-collector:4318/v1/metrics...
+✅ OpenTelemetry metrics dispatched successfully
+
+<span style="color: #10b981;"># --- metrics.prom (Prometheus Text Exposition Format) ---</span>
+# HELP gh_stats_pr_risk_score SRE risk score (0-100) for the evaluated pull request
+# TYPE gh_stats_pr_risk_score gauge
+gh_stats_pr_risk_score{repository="smford/gh-stats",target="pr",risk_level="HIGH"} 65
+
+# HELP gh_stats_pr_lead_time_seconds Pull request lifecycle lead time in seconds
+# TYPE gh_stats_pr_lead_time_seconds gauge
+gh_stats_pr_lead_time_seconds{repository="smford/gh-stats",target="pr"} 14400
+
+# HELP gh_stats_ci_latency_seconds Cumulative CI check runs runtime in seconds
+# TYPE gh_stats_ci_latency_seconds gauge
+gh_stats_ci_latency_seconds{repository="smford/gh-stats",target="pr"} 1452
+
+# HELP gh_stats_ci_flaky_checks_total Total number of flaky CI check runs detected
+# TYPE gh_stats_ci_flaky_checks_total counter
+gh_stats_ci_flaky_checks_total{repository="smford/gh-stats",target="pr"} 1</code></pre>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -369,6 +481,69 @@
           <div class="card-icon">📝</div>
           <h3>Instant Changelog Generation</h3>
           <p>Groups commits into Features (🚀), Bug Fixes (🐛), Performance (⚡), and Refactorings (🛠️), formatted cleanly for GitHub Releases and deployment tickets.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Environment Drift & Promotion Audit Section -->
+  <section id="drift-mode">
+    <div class="container">
+      <div class="section-header">
+        <h2>🌐 Environment Drift & Promotion Audit</h2>
+        <p>Safeguard multi-tier promotions between environments (staging ➔ production) with automated drift risk scoring.</p>
+      </div>
+
+      <div class="features-grid">
+        <div class="card">
+          <div class="card-icon">⚖️</div>
+          <h3>Divergence Tracking</h3>
+          <p>Calculates exact ahead and behind commit divergence between target (e.g. <code>production</code>) and candidate (e.g. <code>staging</code>) branches.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🚨</div>
+          <h3>Unpromoted Breaking Changes</h3>
+          <p>Identifies pending database schema migrations (<code>migrations/*.sql</code>) and breaking contract commits (<code>feat!:</code>) before promoting.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🎯</div>
+          <h3>Promotion Risk Score (0–100)</h3>
+          <p>Combines divergence metrics, blast radius files, and change volume into a promotion risk score with strict quality gates (<code>--fail-on=HIGH</code>).</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Native OpenTelemetry & Prometheus Observability Section -->
+  <section id="observability">
+    <div class="container">
+      <div class="section-header">
+        <h2>📈 Native OpenTelemetry (OTel) & Prometheus Exporters</h2>
+        <p>Stream PR, release, and drift reliability metrics directly to Grafana, Prometheus Pushgateway, and Datadog.</p>
+      </div>
+
+      <div class="features-grid">
+        <div class="card">
+          <div class="card-icon">📊</div>
+          <h3>Prometheus Exposition Format</h3>
+          <p>Export standard <code>.prom</code> text files with <code># HELP</code> and <code># TYPE</code> gauges and counters for PR lead time, risk scores, lines changed, and CI latency.</p>
+          <span class="card-tag">--export-prom</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">📡</div>
+          <h3>OpenTelemetry OTLP HTTP</h3>
+          <p>Dispatch standard OTLP JSON metrics over HTTP directly to OpenTelemetry Collectors, Grafana Cloud OTLP Gateway, or Honeycomb with custom auth headers.</p>
+          <span class="card-tag">--export-otel-endpoint</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">⚡</div>
+          <h3>Zero External Dependencies</h3>
+          <p>Engineered entirely using Go standard library HTTP and formatting primitives, guaranteeing ultra-fast &lt;100ms dispatch without heavy SDK overhead.</p>
+          <span class="card-tag">Standard Library</span>
         </div>
       </div>
     </div>
@@ -552,6 +727,30 @@ jobs:
               <td><span class="risk-level-badge risk-high">WARNING</span></td>
               <td>Release</td>
               <td>Modifications to critical deployment pipelines, cloud infrastructure, or security modules.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS301-DRIFT-SUMMARY</td>
+              <td><span class="risk-level-badge risk-low">NOTE</span></td>
+              <td>Drift</td>
+              <td>Environment drift assessment, ahead/behind commits, and promotion deployment readiness.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS302-DRIFT-EXCESSIVE</td>
+              <td><span class="risk-level-badge risk-high">WARNING</span></td>
+              <td>Drift</td>
+              <td>Excessive branch divergence detected between promotion environments (>20 commits).</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS303-DRIFT-UNPROMOTED-BREAKING</td>
+              <td><span class="risk-level-badge risk-crit">WARNING</span></td>
+              <td>Drift</td>
+              <td>Unpromoted breaking changes (<code>feat!:</code>) or database migrations pending in candidate branch.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS304-DRIFT-UNPROMOTED-SENSITIVE</td>
+              <td><span class="risk-level-badge risk-high">WARNING</span></td>
+              <td>Drift</td>
+              <td>Unpromoted sensitive infrastructure, CI/CD pipeline, or security configuration changes.</td>
             </tr>
           </tbody>
         </table>
