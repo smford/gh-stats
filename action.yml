@@ -50,6 +50,18 @@ inputs:
     description: 'File path to export DORA & SRE metrics in JSON format'
     required: false
     default: ''
+  export-prom:
+    description: 'File path to export Prometheus text exposition format metrics'
+    required: false
+    default: ''
+  export-otel-endpoint:
+    description: 'OpenTelemetry OTLP HTTP metrics endpoint URL (e.g. http://otel-collector:4318/v1/metrics)'
+    required: false
+    default: ''
+  export-otel-headers:
+    description: 'Custom HTTP headers for OpenTelemetry OTLP export (e.g. "X-Scope-OrgID=123,Authorization=Bearer ...")'
+    required: false
+    default: ''
   export-webhook:
     description: 'HTTP/HTTPS Webhook endpoint to dispatch DORA & SRE metrics payload'
     required: false
@@ -90,6 +102,12 @@ outputs:
   metrics-json:
     description: 'Path to the exported metrics JSON file (if export-json is enabled)'
     value: ${{ steps.run-stats.outputs.metrics-json }}
+  metrics-prom:
+    description: 'Path to the exported Prometheus metrics file (if export-prom is enabled)'
+    value: ${{ steps.run-stats.outputs.metrics-prom }}
+  otel-status:
+    description: 'Status of OpenTelemetry export ("success" or "failure" if export-otel-endpoint is enabled)'
+    value: ${{ steps.run-stats.outputs.otel-status }}
   flaky-checks-count:
     description: 'Number of flaky CI check runs detected on the PR'
     value: ${{ steps.run-stats.outputs.flaky-checks-count }}
@@ -176,6 +194,9 @@ runs:
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_CONFIG_PATH: ${{ inputs.config-path }}
         INPUT_EXPORT_JSON: ${{ inputs.export-json }}
+        INPUT_EXPORT_PROM: ${{ inputs.export-prom }}
+        INPUT_EXPORT_OTEL_ENDPOINT: ${{ inputs.export-otel-endpoint }}
+        INPUT_EXPORT_OTEL_HEADERS: ${{ inputs.export-otel-headers }}
         INPUT_EXPORT_WEBHOOK: ${{ inputs.export-webhook }}
         INPUT_WEBHOOK_SECRET: ${{ inputs.webhook-secret }}
         INPUT_MAX_CI_LATENCY: ${{ inputs.max-ci-latency }}

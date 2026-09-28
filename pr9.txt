@@ -1,59 +1,51 @@
-feat: Environment Drift & Promotion Audit mode (--target=drift)
+feat: native OpenTelemetry (OTel) and Prometheus metric export capabilities
 
 ## Summary
-This PR introduces the Environment Drift & Promotion Audit mode (`--target=drift`), providing teams with automated SRE intelligence and risk evaluation before promoting changes between deployment environments (such as staging to production).
+This PR adds native OpenTelemetry (OTel) and Prometheus metric export capabilities to `gh-stats`, enabling engineering organizations to export PR, Release, Repository, and Environment Drift reliability metrics directly into modern observability platforms (Grafana, Mimir, Datadog, Prometheus Pushgateway, and OTel Collectors).
 
-In continuous delivery workflows, long-lived branch divergence between environments frequently leads to high-risk batch releases, unpromoted database migrations, and deployment failures. With `--target=drift`, `gh-stats` audits ahead/behind commit divergence, unpromoted sensitive infrastructure and schema changes, calculates a promotion deployment risk score (0-100), emits SARIF security findings, exports DORA metrics, and renders rich Markdown step summaries.
+All metric exposition logic is built using the Go standard library with zero external dependencies, maintaining sub-second execution speeds and lean binary distribution. In addition, the GitHub Pages documentation and feature showcases have been comprehensively updated.
 
 ### Key Capabilities
-1. Environment Drift Audit CLI (`cmd/gh-stats`):
-- Added `--target=drift` mode comparing target base environment (e.g. `--base=origin/production`) with candidate source environment (e.g. `--head=origin/staging`).
-- Automated branch resolution with sensible defaults and remote prefix handling (`origin/production`, `origin/staging`, `HEAD`).
-- Quality gate enforcement with `--fail-on` (e.g. `--fail-on=HIGH` blocks promotion when drift risk exceeds threshold).
-2. Drift Metrics & Risk Engine (`pkg/analyzer`):
-- Commits ahead: unpromoted commits queued in candidate environment waiting for release.
-- Commits behind: upstream divergence / hotfixes on base environment missing from candidate.
-- Unpromoted breaking changes: conventional commits breaking syntax (`feat!:`, `BREAKING CHANGE:`) and schema migrations (`migrations/`, `*.sql`).
-- High blast radius tracking: unpromoted changes to infrastructure, containers, CI/CD pipelines, and auth modules.
-- Promotion Deployment Risk Score (0-100) and qualitative risk tiers (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`).
-3. Markdown Step Summary Table (`pkg/reporter`):
-- Renders dedicated `🌐 Environment Drift & Promotion Assessment` summary table in `$GITHUB_STEP_SUMMARY`.
-- Highlights base and candidate environments, ahead/behind counts with status indicators, net lines moved, breaking changes, and candidate commit queue.
-- Shows in-sync confirmation banner when environments have zero divergence.
-4. DORA & Observability Telemetry Export (`pkg/exporter`):
-- Added `DriftMetrics` struct and `NewDriftPayload` constructor.
-- Exports structured drift telemetry into DORA payloads for JSON logging or webhook dispatch.
-5. SARIF Security & Reliability Rules (`pkg/analyzer`):
-- `GHSTATS301-DRIFT-SUMMARY`: Environment drift and promotion audit summary (`note`).
-- `GHSTATS302-DRIFT-EXCESSIVE`: Excessive commit divergence detected between deployment environments (`warning`).
-- `GHSTATS303-DRIFT-UNPROMOTED-BREAKING`: Unpromoted breaking changes or database schema migrations waiting between environments (`warning`).
-- `GHSTATS304-DRIFT-UNPROMOTED-SENSITIVE`: Unpromoted critical infrastructure, CI/CD pipeline, or security configuration changes (`warning`).
-6. Demonstration Workflow & Synthetic Testing:
-- Added `.github/workflows/test-environment-drift.yml` for manual dispatch (`workflow_dispatch`) with configurable base and head environments.
-- Added end-to-end multi-tier synthetic drift test script `scripts/test-synthetic-drift.sh`.
-7. GitHub Action Integration (`action.yml`):
-- Added `drift` to target options.
-- Exposes step outputs: `drift-base-ref`, `drift-head-ref`, `drift-commits-ahead`, `drift-commits-behind`, `drift-breaking-count`, `drift-sensitive-count`, `drift-risk-level`, and `drift-risk-score`.
+1. Prometheus Text Exposition Format (`--export-prom=metrics.prom`):
+- Formats metrics in standard Prometheus text representation with `# HELP` and `# TYPE` declarations.
+- Emits gauges and counters for PR lead time (`gh_stats_pr_lead_time_seconds`), SRE risk score (`gh_stats_pr_risk_score`), lines added/deleted/net (`gh_stats_pr_lines_*`), CI pipeline latency (`gh_stats_ci_latency_seconds`), flaky check runs count (`gh_stats_ci_flaky_checks_total`), release breaking changes count (`gh_stats_release_breaking_changes_total`), release deployment risk score (`gh_stats_release_risk_score`), environment drift commit divergence (`gh_stats_drift_commits_ahead`, `gh_stats_drift_commits_behind`), and drift risk score (`gh_stats_drift_risk_score`).
+- Labels include repository slug, target scope, ref, and commit metadata.
+- Supports file output for direct scraping, Prometheus Pushgateway ingestion, or textfile collector aggregation.
+2. OpenTelemetry OTLP HTTP Export (`--export-otel-endpoint=http://otel-collector:4318/v1/metrics`):
+- Dispatches standard OTLP JSON metrics over HTTP POST (`application/json`) to any OpenTelemetry collector, Grafana Cloud OTLP gateway, or Datadog OTLP ingest endpoint.
+- Maps gauges and cumulative sum metrics with Unix nanosecond timestamps into resource and scope metrics.
+- Supports custom headers via `--export-otel-headers` or `otel_headers` configuration (e.g. `Authorization`, `X-Scope-OrgID`, `dd-api-key`).
+3. GitHub Action & Configuration Integration:
+- Action inputs: `export-prom`, `export-otel-endpoint`, and `export-otel-headers`.
+- Action outputs: `metrics-prom` (file path) and `otel-status` (`success` or `failure`).
+- Config file (`.gh-stats.yml`): `export.prom_path`, `export.export_prom`, `export.otel_endpoint`, `export.export_otel_endpoint`, and `export.otel_headers`.
+4. Observability Documentation & Guide:
+- Expanded `README.md` with Grafana / Prometheus / Pushgateway, OpenTelemetry Collector, and Datadog ingestion examples.
+- Added metric reference table and updated CLI flags list.
+5. GitHub Pages Documentation & Features Site:
+- Updated `docs/index.html` navigation with direct anchor links to Drift Audit and Observability sections.
+- Added feature showcase cards for Native OTel & Prometheus Exporter, Environment Drift & Promotion Audit, Deterministic SemVer Bump, and Automated Release Notes Publishing.
+- Added interactive demo preview tabs for Prometheus & OTel Metrics and Environment Drift Audit.
+- Added dedicated documentation sections for `#drift-mode` and `#observability`.
+- Added SARIF rules `GHSTATS301` through `GHSTATS304` to the searchable rules reference table.
+6. Example Workflow:
+- Added `.github/workflows/test-metric-export.yml` supporting manual dispatch and artifact archiving.
 
 ## Changes
-- `cmd/gh-stats/main.go`: Added `drift` target mode, flag handling, drift outputs, DORA drift export, and fail-on gate.
-- `pkg/gitutil/git.go`: Added `GetAheadBehind()` using `git rev-list --left-right --count`.
-- `pkg/gitutil/git_test.go`: Added `TestGetAheadBehind` unit test.
-- `pkg/analyzer/analyzer.go`: Added SARIF rules `GHSTATS301` through `GHSTATS304`.
-- `pkg/analyzer/drift.go`: Added `DriftStats`, `AnalyzeDrift()`, `CalculateRisk()`, and `PopulateSARIF()`.
-- `pkg/analyzer/drift_test.go`: Added synthetic branch drift tests and excessive divergence tests.
-- `pkg/reporter/markdown.go`: Added `GenerateDriftSummary()` and `formatDriftStatus()`.
-- `pkg/reporter/markdown_test.go`: Added `TestGenerateDriftSummary` covering drift and in-sync states.
-- `pkg/exporter/exporter.go`: Added `DriftMetrics` and `NewDriftPayload()`.
-- `pkg/exporter/exporter_test.go`: Added `TestNewDriftPayload`.
-- `scripts/test-synthetic-drift.sh`: Created end-to-end multi-tier synthetic drift test suite.
-- `.github/workflows/test-environment-drift.yml`: Created manual demonstration workflow.
-- `action.yml`: Documented `drift` target and added `drift-*` step outputs.
-- `README.md`: Documented Environment Drift & Promotion Audit with workflow examples, CLI flags, outputs, and SARIF rules.
+- `pkg/config/config.go`: Added `PromPath`, `ExportProm`, `OTelEndpoint`, `ExportOTelEndpoint`, and `OTelHeaders` to `ExportConfig` with helper methods `GetPromPath()` and `GetOTelEndpoint()`.
+- `pkg/config/config_test.go`: Added tests validating YAML parsing and aliases for Prometheus and OTel export settings.
+- `pkg/exporter/prometheus.go`: Implemented `GeneratePrometheusMetrics()` and `ExportPrometheus()`.
+- `pkg/exporter/prometheus_test.go`: Added unit tests verifying Prometheus metric syntax, comments, types, and label formatting for PR, Release, and Drift payloads.
+- `pkg/exporter/otlp.go`: Implemented standard OTLP HTTP JSON payload serialization (`BuildOTLPMetricsPayload`), header parsing (`ParseOTLPHeaders`), and HTTP dispatch (`ExportOTLP`).
+- `pkg/exporter/otlp_test.go`: Added tests verifying OTLP JSON serialization, header parsing, HTTP endpoint posting, and error propagation.
+- `cmd/gh-stats/main.go`: Added CLI flags `--export-prom`, `--export-otel-endpoint`, `--export-otel-headers`, config resolution, export execution, and GitHub Action step outputs.
+- `action.yml`: Exposed `export-prom`, `export-otel-endpoint`, and `export-otel-headers` inputs, and `metrics-prom` and `otel-status` outputs.
+- `README.md`: Added documentation for Prometheus and OpenTelemetry exporters, ingestion examples for Prometheus/Pushgateway, Grafana Cloud, and Datadog, updated configuration examples, and CLI flags list.
+- `docs/index.html`: Added Observability and Drift Audit feature cards, interactive tabs, documentation sections, navigation links, and SARIF rules reference entries.
+- `.github/workflows/test-metric-export.yml`: Added manual demonstration workflow for metric export.
 
 ## Verification
-- `go test -count=1 -race ./...` (All tests passed, 0 race conditions)
-- `go vet ./...` (Clean, 0 warnings)
-- `shellcheck scripts/*.sh examples/hooks/*` (Clean, 0 errors)
-- `./scripts/test-synthetic-drift.sh` (All 3 phases passed successfully)
-- CLI manual execution: verified `--target=drift` with `--base=main --head=HEAD`.
+- `go test -count=1 -race ./...` (All packages pass with race detector enabled)
+- `go vet ./...` (Passed with zero issues)
+- `shellcheck scripts/*.sh examples/hooks/*` (Clean, zero issues)
+- Synthetic release and drift tests (`test-synthetic-release.sh`, `test-synthetic-drift.sh`) passed with zero errors
