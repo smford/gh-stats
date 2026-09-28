@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"io"
+	"strings"
 )
 
 // Run starts the interactive TUI event loop, or gracefully falls back to plain text in non-interactive / CI environments.
@@ -28,7 +29,7 @@ func Run(model *DashboardModel, in io.Reader, out io.Writer) error {
 
 	// Switch to alternate screen and hide cursor
 	fmt.Fprint(out, EnterAltScreen+HideCursor)
-	defer fmt.Fprint(out, ExitAltScreen+ShowCursor)
+	defer fmt.Fprint(out, ExitAltScreen+ShowCursor+Reset+"\r\n")
 
 	// Main event loop
 	for {
@@ -36,8 +37,10 @@ func Run(model *DashboardModel, in io.Reader, out io.Writer) error {
 		model.Width = w
 		model.Height = h
 
-		// Render screen
+		// Render screen with explicit \r\n line endings to guarantee left-margin resets in raw terminal modes
 		viewBuffer := Render(model)
+		viewBuffer = strings.ReplaceAll(viewBuffer, "\r\n", "\n")
+		viewBuffer = strings.ReplaceAll(viewBuffer, "\n", "\r\n")
 		fmt.Fprint(out, CursorHome+ClearScreen+viewBuffer)
 
 		// Read key input

@@ -1,36 +1,25 @@
-feat: interactive terminal UI dashboard (gh-stats tui)
+fix(tui): normalize line endings to \r\n and preserve terminal onlcr to fix staircase effect
 
 ## Summary
-Introduces a zero-dependency interactive Terminal UI (TUI) dashboard to `gh-stats` (`gh-stats tui` or `--tui`). The dashboard elevates local developer experience during branch development and code review by presenting visual SRE risk ratings, scrollable blast radius file inspections, interactive commit changelogs, and domain expert reviewer recommendations directly inside the terminal.
+Fixes the terminal "staircase effect" when launching the interactive Terminal UI (`gh-stats tui`) where lines failed to return to the left margin.
+
+## Root Cause
+When entering terminal raw mode via `stty raw`, POSIX terminals disable output post-processing (`OPOST` / `ONLCR`). In that mode, standard line feed (`\n`) only moves the cursor down one row without returning the cursor to column 0, causing each subsequent line to indent from where the previous line finished.
 
 ## Key Changes
-- **CLI Integration (`cmd/gh-stats`):**
-Added `tui` subcommand (`gh-stats tui`) and `--tui` flag.
-Defaults target to `pr` mode for local branch reviews against base.
-Suppresses console logs when launching interactively to keep terminal displays clean.
+- **Explicit Carriage Returns (`pkg/tui/tui.go`):**
+Normalized all rendered screen buffer lines to emit explicit `\r\n` line endings (`CR+LF`) before writing to `stdout`:
+```go
+viewBuffer = strings.ReplaceAll(viewBuffer, "\r\n", "\n")
+viewBuffer = strings.ReplaceAll(viewBuffer, "\n", "\r\n")
+```
+Appended `\r\n` upon dashboard exit to restore the shell prompt cleanly to column 0.
 
-- **TUI Dashboard Engine (`pkg/tui`):**
-Built a lightweight, zero-dependency TUI using ANSI escape sequences and terminal raw mode.
-Implemented 4 interactive dashboard views:
-1. SRE Risk Overview: Visual risk score meter gauge, metrics summary, and complete risk factor breakdown.
-2. Files & Blast Radius: Scrollable list of modified files with additions/deletions, sensitive blast radius badges (CI/CD, Migrations, Security), and selected file details pane.
-3. Commits & Changelog: Categorized commit history with conventional commit badges ([FEAT], [FIX], [BREAKING]), author metadata, and selected commit preview pane.
-4. Domain Reviewers: Suggested component code owners and historical commit velocity.
-
-- **Graceful Fallback:**
-Detects non-interactive environments and CI runners (`[ -t 1 ]`, `CI`, `TERM=dumb`).
-Gracefully renders structured plain text output when running non-interactively without terminal corruption.
-
-- **Unit Testing & View Models (`pkg/tui/view_test.go`):**
-Comprehensive tests covering `DashboardModel` navigation, cursor bounds, page scrolling, and tab switching.
-Verified rendering outputs across all tabs, help overlays, and non-interactive plain text fallbacks.
-
-- **Documentation & Web Playground (`README.md`, `docs/index.html`):**
-Updated `README.md` with TUI navigation keys table, CLI usage examples, and command flags.
-Updated `docs/index.html` with TUI feature card.
+- **Preserve Output Processing (`pkg/tui/terminal.go`):**
+Switched raw mode configuration from `stty raw -echo min 1` to `stty -echo -icanon min 1` (non-canonical character input with echo disabled), which keeps `ONLCR` (automatic mapping of newline to carriage return) enabled in the terminal driver.
 
 ## Verification
-- `go test -count=1 -race ./...` (All tests pass with 100% success)
-- `go vet ./...` (Clean, zero issues)
-- `shellcheck scripts/*.sh examples/hooks/*` (Clean, zero warnings)
-- Interactive and non-interactive execution verified with compiled binary.
+- `go test -count=1 -race ./...` (All tests pass)
+- `go vet ./...` (Clean)
+- `shellcheck scripts/*.sh examples/hooks/*` (Clean)
+- Tested `./gh-stats tui` locally; confirmed all lines, tables, and borders align to column 0.
