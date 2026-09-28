@@ -48,6 +48,10 @@ func main() {
 		flagExportProm          string
 		flagExportOTelEndpoint  string
 		flagExportOTelHeaders   string
+		flagRiskBudgetPoints    int
+		flagRiskBudgetWindow    int
+		flagRiskBudgetCritical  int
+		flagFailOnRiskBudget    bool
 		flagMaxCILatency        int
 		flagFailOnFlaky         bool
 		flagCheckRuns           bool
@@ -74,6 +78,10 @@ func main() {
 	flag.StringVar(&flagExportProm, "export-prom", getEnvDefault("INPUT_EXPORT_PROM", ""), "Path to export Prometheus text exposition format metrics file")
 	flag.StringVar(&flagExportOTelEndpoint, "export-otel-endpoint", getEnvDefault("INPUT_EXPORT_OTEL_ENDPOINT", getEnvDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "")), "OpenTelemetry OTLP HTTP metrics endpoint URL (e.g. http://otel-collector:4318/v1/metrics)")
 	flag.StringVar(&flagExportOTelHeaders, "export-otel-headers", getEnvDefault("INPUT_EXPORT_OTEL_HEADERS", getEnvDefault("OTEL_EXPORTER_OTLP_HEADERS", "")), "Custom headers for OTLP HTTP metrics export (key=value,...)")
+	flag.IntVar(&flagRiskBudgetPoints, "risk-budget-points", 0, "Monthly SRE risk budget points for rolling window (default from config)")
+	flag.IntVar(&flagRiskBudgetWindow, "risk-budget-window", 0, "Rolling audit window in days for risk budget (default 30)")
+	flag.IntVar(&flagRiskBudgetCritical, "risk-budget-max-critical", 0, "Max allowed CRITICAL risk PRs in rolling window")
+	flag.BoolVar(&flagFailOnRiskBudget, "fail-on-risk-budget", getEnvDefault("INPUT_FAIL_ON_RISK_BUDGET", "false") == "true", "Fail quality gate if squad risk budget is exceeded")
 	flag.IntVar(&flagMaxCILatency, "max-ci-latency", 0, "Maximum acceptable CI check latency in minutes (default 15)")
 	flag.BoolVar(&flagFailOnFlaky, "fail-on-flaky", getEnvDefault("INPUT_FAIL_ON_FLAKY", "false") == "true", "Fail quality gate if flaky CI checks are detected")
 	flag.BoolVar(&flagCheckRuns, "check-runs", true, "Fetch CI check runs for latency and flakiness analysis")
@@ -145,6 +153,17 @@ func main() {
 	}
 	if !flagFailOnFlaky && cfg.Thresholds.FailOnFlakyCI {
 		flagFailOnFlaky = true
+	}
+	if flagRiskBudgetPoints > 0 {
+		cfg.RiskBudget.MonthlyRiskPoints = flagRiskBudgetPoints
+		cfg.RiskBudget.Enabled = true
+	}
+	if flagRiskBudgetWindow > 0 {
+		cfg.RiskBudget.WindowDays = flagRiskBudgetWindow
+	}
+	if flagRiskBudgetCritical > 0 {
+		cfg.RiskBudget.MaxCriticalPRs = flagRiskBudgetCritical
+		cfg.RiskBudget.Enabled = true
 	}
 
 	// Auto-detect repo slug from git remote if not provided
@@ -273,6 +292,18 @@ func main() {
 		if !flagQuiet {
 			fmt.Printf("✅ PR Analysis Complete: Risk=%s (%d/100), Files=%d, Additions=+%d, Deletions=-%d\n",
 				stats.RiskLevel, stats.RiskScore, stats.FilesChanged, stats.TotalAdditions, stats.TotalDeletions)
+		}
+
+		if stats.RiskBudget != nil && stats.RiskBudget.Enabled {
+			setGithubOutput("risk-budget-utilization", fmt.Sprintf("%.1f", stats.RiskBudget.UtilizationPercent))
+			setGithubOutput("risk-budget-burn-rate", fmt.Sprintf("%.2f", stats.RiskBudget.BurnRate))
+			setGithubOutput("risk-budget-status", stats.RiskBudget.Status)
+			setGithubOutput("risk-budget-points-used", fmt.Sprintf("%d", stats.RiskBudget.TotalProjectedPoints))
+			if !flagQuiet {
+				fmt.Printf("📉 PR Risk Budget: %d/%d pts (%.1f%% utilized), Burn Rate: %.2fx, Status: %s\n",
+					stats.RiskBudget.TotalProjectedPoints, stats.RiskBudget.MonthlyRiskPoints,
+					stats.RiskBudget.UtilizationPercent, stats.RiskBudget.BurnRate, stats.RiskBudget.Status)
+			}
 		}
 
 	case "repo":
@@ -707,6 +738,16 @@ func main() {
 		}
 		if flakyCount > 0 {
 			fmt.Fprintf(os.Stderr, "❌ Quality Gate Failed: %d flaky CI check run(s) detected\n", flakyCount)
+			os.Exit(2)
+		}
+	}
+
+	// Quality gate enforcement for risk budget if configured
+	if target == "pr" && prStats != nil && prStats.RiskBudget != nil && prStats.RiskBudget.Enabled && flagFailOnRiskBudget {
+		if prStats.RiskBudget.Status == "EXCEEDED" {
+			fmt.Fprintf(os.Stderr, "❌ Quality Gate Failed: PR risk budget exceeded (status=%s, %.1f%% utilized, %d/%d points, %d/%d critical PRs)\n",
+				prStats.RiskBudget.Status, prStats.RiskBudget.UtilizationPercent, prStats.RiskBudget.TotalProjectedPoints, prStats.RiskBudget.MonthlyRiskPoints,
+				prStats.RiskBudget.TotalCriticalPRs, prStats.RiskBudget.MaxCriticalPRs)
 			os.Exit(2)
 		}
 	}

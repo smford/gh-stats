@@ -168,3 +168,51 @@ export:
 	}
 }
 
+func TestRiskBudgetConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	yamlContent := `
+risk_budget:
+  monthly_risk_points: 500
+  window_days: 30
+  max_critical_prs: 2
+  burn_rate_alert_ratio: 1.2
+`
+	configPath := filepath.Join(tmpDir, ".gh-stats.yml")
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test config file: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath, tmpDir)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	if !cfg.RiskBudget.IsEnabled() {
+		t.Errorf("expected risk budget to be enabled")
+	}
+	if cfg.RiskBudget.MonthlyRiskPoints != 500 {
+		t.Errorf("expected monthly_risk_points 500, got %d", cfg.RiskBudget.MonthlyRiskPoints)
+	}
+	if cfg.RiskBudget.WindowDays != 30 {
+		t.Errorf("expected window_days 30, got %d", cfg.RiskBudget.WindowDays)
+	}
+	if cfg.RiskBudget.MaxCriticalPRs != 2 {
+		t.Errorf("expected max_critical_prs 2, got %d", cfg.RiskBudget.MaxCriticalPRs)
+	}
+	if cfg.RiskBudget.BurnRateAlertRatio != 1.2 {
+		t.Errorf("expected burn_rate_alert_ratio 1.2, got %f", cfg.RiskBudget.BurnRateAlertRatio)
+	}
+
+	// Test default fallback values when empty
+	defaultCfg := DefaultConfig()
+	if defaultCfg.RiskBudget.IsEnabled() {
+		t.Errorf("expected default risk budget to be disabled")
+	}
+	if defaultCfg.RiskBudget.WindowDays != 30 {
+		t.Errorf("expected default window_days 30, got %d", defaultCfg.RiskBudget.WindowDays)
+	}
+	if defaultCfg.RiskBudget.BurnRateAlertRatio != 1.0 {
+		t.Errorf("expected default burn_rate_alert_ratio 1.0, got %f", defaultCfg.RiskBudget.BurnRateAlertRatio)
+	}
+}
+

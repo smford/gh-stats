@@ -91,6 +91,21 @@ type PRMetrics struct {
 	ReviewsCount           int                `json:"reviewsCount,omitempty"`
 	CommitsCount           int                `json:"commitsCount"`
 	CIPipeline             *CIPipelineMetrics `json:"ciPipeline,omitempty"`
+	RiskBudget             *RiskBudgetMetrics `json:"riskBudget,omitempty"`
+}
+
+// RiskBudgetMetrics encapsulates SRE risk budget and SLO burn rate for telemetry export.
+type RiskBudgetMetrics struct {
+	MonthlyRiskPoints    int     `json:"monthlyRiskPoints"`
+	WindowDays           int     `json:"windowDays"`
+	MaxCriticalPRs       int     `json:"maxCriticalPRs"`
+	HistoricalPoints     int     `json:"historicalPoints"`
+	CurrentPRPoints      int     `json:"currentPRPoints"`
+	TotalProjectedPoints int     `json:"totalProjectedPoints"`
+	TotalCriticalPRs     int     `json:"totalCriticalPRs"`
+	UtilizationPercent   float64 `json:"utilizationPercent"`
+	BurnRate             float64 `json:"burnRate"`
+	Status               string  `json:"status"`
 }
 
 // CIPipelineMetrics encapsulates CI build latency and test flakiness telemetry.
@@ -180,6 +195,21 @@ func NewPRPayload(stats *analyzer.PRStats, repoSlug string) *DORAMetricsPayload 
 			LongestRunDurationSeconds: stats.CIPipelineStats.LongestRunDuration.Seconds(),
 			LongestRunName:            stats.CIPipelineStats.LongestRunName,
 			FlakyRunsCount:            flakyCount,
+		}
+	}
+
+	if stats.RiskBudget != nil && stats.RiskBudget.Enabled {
+		prMetrics.RiskBudget = &RiskBudgetMetrics{
+			MonthlyRiskPoints:    stats.RiskBudget.MonthlyRiskPoints,
+			WindowDays:           stats.RiskBudget.WindowDays,
+			MaxCriticalPRs:       stats.RiskBudget.MaxCriticalPRs,
+			HistoricalPoints:     stats.RiskBudget.HistoricalPoints,
+			CurrentPRPoints:      stats.RiskBudget.CurrentPRPoints,
+			TotalProjectedPoints: stats.RiskBudget.TotalProjectedPoints,
+			TotalCriticalPRs:     stats.RiskBudget.TotalCriticalPRs,
+			UtilizationPercent:   stats.RiskBudget.UtilizationPercent,
+			BurnRate:             stats.RiskBudget.BurnRate,
+			Status:               stats.RiskBudget.Status,
 		}
 	}
 

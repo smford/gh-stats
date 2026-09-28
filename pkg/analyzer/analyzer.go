@@ -327,6 +327,22 @@ var (
 		DefaultConfiguration: &sarif.RuleConfiguration{Level: "warning"},
 	}
 
+	RulePRRiskBudgetExceeded = sarif.Rule{
+		ID:   "GHSTATS010-RISK-BUDGET-EXCEEDED",
+		Name: "PRRiskBudgetExceeded",
+		ShortDescription: sarif.MultiformatMessage{
+			Text: "PR risk budget utilization or burn rate exceeds threshold for the rolling window",
+		},
+		FullDescription: &sarif.MultiformatMessage{
+			Text: "The squad's cumulative PR risk points or critical PR count over the rolling window has exceeded the allocated SRE risk budget or is burning faster than sustainable.",
+		},
+		Help: &sarif.MultiformatMessage{
+			Text:     "Reduce change scope, add comprehensive automated tests, split the PR, or schedule higher risk deployments during lower-impact operational windows.",
+			Markdown: "### SRE Risk Budget Guidance\n- **Budget Exhaustion**: Burning through risk points faster than the monthly allocation increases change failure probability and production rollback risk.\n- **Action**: Pair on high-risk changes, bolster test coverage deltas, or delay non-urgent architectural shifts until the risk budget replenishes.",
+		},
+		DefaultConfiguration: &sarif.RuleConfiguration{Level: "warning"},
+	}
+
 	RuleReleaseSummary = sarif.Rule{
 		ID:   "GHSTATS201-RELEASE-SUMMARY",
 		Name: "ReleaseComparisonSummary",

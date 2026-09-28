@@ -209,6 +209,94 @@ func (r *Runner) GetCommits(baseRef, headRef string) ([]CommitInfo, error) {
 	return commits, nil
 }
 
+// MergedCommitHistoryEntry represents a historical commit with its file diff stats on the base branch.
+type MergedCommitHistoryEntry struct {
+	Hash      string
+	FullHash  string
+	Parents   []string
+	Timestamp time.Time
+	Author    string
+	Subject   string
+	DiffStats []FileDiffStat
+}
+
+// GetMergedPRHistory returns commits on baseRef since the specified time, along with their numstats.
+func (r *Runner) GetMergedPRHistory(baseRef string, since time.Time) ([]MergedCommitHistoryEntry, error) {
+	if baseRef == "" || baseRef == "staged" || baseRef == "--cached" {
+		baseRef = r.GetDefaultBaseRef()
+	}
+
+	sinceArg := fmt.Sprintf("--since=%s", since.Format(time.RFC3339))
+	out, err := r.Exec("log", "--first-parent", "-m", sinceArg, "--numstat", "--format=COMMIT|%h|%H|%P|%ct|%an|%s", baseRef)
+	if err != nil {
+		out, err = r.Exec("log", "--first-parent", "-m", sinceArg, "--numstat", "--format=COMMIT|%h|%H|%P|%ct|%an|%s", "HEAD")
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return ParseMergedPRHistory(out), nil
+}
+
+// ParseMergedPRHistory parses the output of git log --first-parent -m --numstat into MergedCommitHistoryEntry slices.
+func ParseMergedPRHistory(output string) []MergedCommitHistoryEntry {
+	var entries []MergedCommitHistoryEntry
+	var current *MergedCommitHistoryEntry
+
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "COMMIT|") {
+			if current != nil {
+				entries = append(entries, *current)
+			}
+			parts := strings.SplitN(trimmed, "|", 7)
+			if len(parts) >= 7 {
+				sec, _ := strconv.ParseInt(parts[4], 10, 64)
+				commitTime := time.Unix(sec, 0)
+				parents := strings.Fields(parts[3])
+				current = &MergedCommitHistoryEntry{
+					Hash:      parts[1],
+					FullHash:  parts[2],
+					Parents:   parents,
+					Timestamp: commitTime,
+					Author:    parts[5],
+					Subject:   parts[6],
+					DiffStats: make([]FileDiffStat, 0),
+				}
+			} else {
+				current = nil
+			}
+			continue
+		}
+
+		if current != nil {
+			fields := strings.Fields(trimmed)
+			if len(fields) >= 3 {
+				adds, _ := strconv.Atoi(fields[0])
+				dels, _ := strconv.Atoi(fields[1])
+				path := fields[2]
+				current.DiffStats = append(current.DiffStats, FileDiffStat{
+					Path:      path,
+					Additions: adds,
+					Deletions: dels,
+					Status:    "M",
+				})
+			}
+		}
+	}
+
+	if current != nil {
+		entries = append(entries, *current)
+	}
+
+	return entries
+}
+
 // GetAheadBehind returns the number of commits headRef is ahead of baseRef (unpromoted commits)
 // and behind baseRef (upstream divergence).
 func (r *Runner) GetAheadBehind(baseRef, headRef string) (ahead, behind int, err error) {

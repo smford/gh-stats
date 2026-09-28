@@ -31,6 +31,7 @@
       <ul class="nav-links">
         <li><a href="#features">Features</a></li>
         <li><a href="#playground">Interactive Demo</a></li>
+        <li><a href="#risk-budget">Risk Budget & SLOs</a></li>
         <li><a href="#release-mode">Release Comparison</a></li>
         <li><a href="#drift-mode">Drift Audit</a></li>
         <li><a href="#observability">Observability & OTel</a></li>
@@ -129,6 +130,13 @@
         </div>
 
         <div class="card">
+          <div class="card-icon">📉</div>
+          <h3>PR Risk Budget & SLO Burn Rate</h3>
+          <p>Tracks cumulative risk points against a monthly squad budget across a rolling git window. Computes SLO burn rates, utilization %, and halts merges when budget is depleted.</p>
+          <span class="card-tag">SRE SLO Tracking</span>
+        </div>
+
+        <div class="card">
           <div class="card-icon">📈</div>
           <h3>Native OTel & Prometheus Exporter</h3>
           <p>Dispatches standard Prometheus text exposition format metrics (<code>.prom</code>) and OpenTelemetry OTLP HTTP JSON payloads directly to Grafana, Datadog, and OTel collectors with zero external dependencies.</p>
@@ -197,6 +205,7 @@
 
       <div class="tabs-nav">
         <button class="tab-btn active" data-tab="tab-pr">Pull Request Risk Simulator</button>
+        <button class="tab-btn" data-tab="tab-budget">Risk Budget & SLO Burn Rate</button>
         <button class="tab-btn" data-tab="tab-release">Release Comparison Preview</button>
         <button class="tab-btn" data-tab="tab-drift">Environment Drift Audit</button>
         <button class="tab-btn" data-tab="tab-prom">Prometheus & OTel Metrics</button>
@@ -265,6 +274,48 @@
               </div>
               <div id="simulator-output" class="preview-output">Loading...</div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Risk Budget & SLO Burn Rate -->
+      <div id="tab-budget" class="tab-content">
+        <div class="terminal-window">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <span class="dot-red"></span>
+              <span class="dot-yellow"></span>
+              <span class="dot-green"></span>
+            </div>
+            <span class="terminal-title">gh-stats --target=pr --base=main --risk-budget-points=500 --fail-on-risk-budget</span>
+            <span></span>
+          </div>
+          <div class="terminal-body">
+<pre><code><span style="color: #38bdf8;">$ gh-stats --target=pr --base=main --risk-budget-points=500 --fail-on-risk-budget</span>
+🔍 gh-stats: running in [PR] mode
+📉 SRE Risk Budget: 520 / 500 projected points (104.0% utilized), Burn Rate: 1.85x
+🚨 Status: EXCEEDED (Rolling Window: 30 days)
+
+<span style="color: #10b981;">## 📉 PR Risk Budget & SRE SLO Burn Rate</span>
+
+> 🚨 **Risk Budget Exceeded:** Squad risk budget is **104.0%** utilized with SLO burn rate **1.85x**!
+
+| Metric | Value | Budget Limit | Status |
+| :--- | :--- | :--- | :--- |
+| **Rolling Window** | `30 days` | `30 days` | ℹ️ Active Window |
+| **Cumulative Risk Points** | `520 pts` (Historical: `450` + This PR: `70`) | `500 pts` | <span style="color: #ef4444; font-weight: bold;">🚨 Exceeded (104.0%)</span> |
+| **SLO Burn Rate** | `1.85x` | `1.00x max` | <span style="color: #ef4444; font-weight: bold;">🚨 Critical Burn</span> |
+| **Critical PRs (Score ≥75)** | `2` merged (+`0` this PR) | `2 max` | ⚠️ At Limit |
+| **Merged PRs in Window** | `12` PRs | - | ℹ️ Historical Velocity |
+
+### 📜 Recent Merged PRs in Window
+| Commit / PR | Author | Merged | Changes | Risk Score |
+| :--- | :--- | :--- | :--- | :---: |
+| `deadbee` feat: major payment migration | Alice | Sep 23 | `+400 / -50` | `85` (CRITICAL) |
+| `c0ffee1` feat(auth): OAuth2 token rotation | Bob | Sep 18 | `+220 / -15` | `65` (HIGH) |
+
+<span style="color: #ef4444; font-weight: bold;">❌ Quality Gate Failed: PR risk budget status is EXCEEDED (--fail-on-risk-budget)
+   Cumulative projected risk points [520] exceeds monthly budget limit [500]</span></code></pre>
           </div>
         </div>
       </div>
@@ -451,6 +502,39 @@ gh_stats_ci_latency_seconds{repository="smford/gh-stats",target="pr"} 1452
 # TYPE gh_stats_ci_flaky_checks_total counter
 gh_stats_ci_flaky_checks_total{repository="smford/gh-stats",target="pr"} 1</code></pre>
           </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PR Risk Budget & SRE SLO Burn Rate Section -->
+  <section id="risk-budget">
+    <div class="container">
+      <div class="section-header">
+        <h2>📉 PR Risk Budget & SRE SLO Burn Rate Tracking</h2>
+        <p>Model code change risk like Google SRE error budgets: track rolling risk points, detect accelerated burn rates, and halt destabilizing merges.</p>
+      </div>
+
+      <div class="features-grid">
+        <div class="card">
+          <div class="card-icon">📉</div>
+          <h3>Rolling Git Window History</h3>
+          <p>Mines historical merged PR commits on the base branch across a rolling window (e.g. <code>30 days</code>) using native git log numstat analysis with zero external databases.</p>
+          <span class="card-tag">--risk-budget-window=30</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">⚡</div>
+          <h3>SLO Burn Rate Multiplier</h3>
+          <p>Quantifies risk consumption velocity relative to sustainable rate (<code>Burn Rate = Observed Daily Rate / Sustainable Daily Rate</code>), alerting at elevated (<code>&ge;1.0x</code>) and critical (<code>&ge;1.5x</code>) burn paces.</p>
+          <span class="card-tag">Burn Rate Telemetry</span>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🛡️</div>
+          <h3>Automated Quality Gating & Caps</h3>
+          <p>Caps allowable <code>CRITICAL</code> PRs (score &ge; 75) and halts CI workflows via <code>--fail-on-risk-budget</code> before cumulative risk depletes the squad budget.</p>
+          <span class="card-tag">--fail-on-risk-budget</span>
         </div>
       </div>
     </div>
@@ -691,6 +775,12 @@ jobs:
               <td><span class="risk-level-badge risk-high">WARNING</span></td>
               <td>PR</td>
               <td>Check run failed initially but passed on retry on the exact same commit SHA without code changes.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS010-RISK-BUDGET-EXCEEDED</td>
+              <td><span class="risk-level-badge risk-crit">ERROR</span></td>
+              <td>PR</td>
+              <td>Squad PR risk budget or critical PR limit exceeded in rolling window, burning risk points too fast.</td>
             </tr>
             <tr>
               <td class="rule-code">GHSTATS101-REPO-SUMMARY</td>

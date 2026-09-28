@@ -251,4 +251,37 @@ func TestGetAheadBehind(t *testing.T) {
 	}
 }
 
+func TestParseMergedPRHistory(t *testing.T) {
+	rawOutput := `COMMIT|a1b2c3d|a1b2c3d4e5f6|parent1 parent2|1790595762|Alice|Merge pull request #15 from alice/feat
+50	0	pkg/api/api.go
+10	5	pkg/api/api_test.go
+
+COMMIT|b2c3d4e|b2c3d4e5f6a1|parent3|1790595800|Bob|feat(auth): add login endpoint (#16)
+25	2	pkg/auth/login.go
+`
+	entries := ParseMergedPRHistory(rawOutput)
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	e1 := entries[0]
+	if e1.Hash != "a1b2c3d" || e1.Author != "Alice" || len(e1.Parents) != 2 {
+		t.Errorf("unexpected entry 1: %+v", e1)
+	}
+	if len(e1.DiffStats) != 2 {
+		t.Errorf("expected 2 diff stats in entry 1, got %d", len(e1.DiffStats))
+	}
+	if e1.DiffStats[0].Path != "pkg/api/api.go" || e1.DiffStats[0].Additions != 50 {
+		t.Errorf("unexpected diff stat: %+v", e1.DiffStats[0])
+	}
+
+	e2 := entries[1]
+	if e2.Hash != "b2c3d4e" || e2.Author != "Bob" || len(e2.Parents) != 1 {
+		t.Errorf("unexpected entry 2: %+v", e2)
+	}
+	if len(e2.DiffStats) != 1 {
+		t.Errorf("expected 1 diff stat in entry 2, got %d", len(e2.DiffStats))
+	}
+}
+
 

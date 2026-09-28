@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -41,6 +42,7 @@ type PRStats struct {
 	RiskLevel            string                   // "LOW", "MEDIUM", "HIGH", "CRITICAL"
 	PrimaryFile          string                   // representative file for PR-wide SARIF results
 	Config               *config.Config           // Active repository configuration
+	RiskBudget           *RiskBudgetStats         // SRE Risk Budget & SLO Burn Rate tracking
 	SuggestedBump        string                   // "major", "minor", "patch", "none"
 	SuggestedVersion     string                   // e.g. "v0.5.0"
 }
@@ -147,6 +149,11 @@ func AnalyzePR(runner *gitutil.Runner, baseRef, headRef string, cfg *config.Conf
 
 	stats.RecommendedReviewers = findRecommendedReviewers(runner, stats)
 	calculateRisk(stats)
+
+	// Evaluate SRE Risk Budget & SLO Burn Rate if configured
+	if cfg.RiskBudget.IsEnabled() {
+		stats.RiskBudget = EvaluateRiskBudget(runner, baseRef, stats.RiskScore, stats.RiskLevel, cfg, time.Time{})
+	}
 
 	// Calculate deterministic suggested version bump for PR
 	stats.SuggestedBump = stats.DetermineBump()
@@ -337,6 +344,42 @@ func calculateRisk(stats *PRStats) {
 // RecalculateRisk re-evaluates the SRE risk score and level after API enrichment.
 func (stats *PRStats) RecalculateRisk() {
 	calculateRisk(stats)
+	if stats.RiskBudget != nil {
+		stats.RiskBudget.CurrentPRPoints = stats.RiskScore
+		stats.RiskBudget.IsCurrentPRCritical = (stats.RiskLevel == "CRITICAL" || stats.RiskScore >= 80)
+		stats.RiskBudget.TotalProjectedPoints = stats.RiskBudget.HistoricalPoints + stats.RiskScore
+		stats.RiskBudget.TotalCriticalPRs = stats.RiskBudget.HistoricalCriticalPRs
+		if stats.RiskBudget.IsCurrentPRCritical {
+			stats.RiskBudget.TotalCriticalPRs++
+		}
+		if stats.RiskBudget.MonthlyRiskPoints > 0 {
+			stats.RiskBudget.UtilizationPercent = (float64(stats.RiskBudget.TotalProjectedPoints) / float64(stats.RiskBudget.MonthlyRiskPoints)) * 100.0
+			stats.RiskBudget.UtilizationPercent = math.Round(stats.RiskBudget.UtilizationPercent*10) / 10
+
+			daysSpan := stats.RiskBudget.DaysSpan
+			if daysSpan <= 0 {
+				daysSpan = float64(stats.RiskBudget.WindowDays)
+			}
+			sustainableDailyRate := float64(stats.RiskBudget.MonthlyRiskPoints) / float64(stats.RiskBudget.WindowDays)
+			observedDailyRate := float64(stats.RiskBudget.TotalProjectedPoints) / daysSpan
+			rawBurnRate := observedDailyRate / sustainableDailyRate
+			stats.RiskBudget.BurnRate = math.Round(rawBurnRate*100) / 100
+		}
+		isExceeded := false
+		if stats.RiskBudget.MonthlyRiskPoints > 0 && stats.RiskBudget.TotalProjectedPoints > stats.RiskBudget.MonthlyRiskPoints {
+			isExceeded = true
+		}
+		if stats.RiskBudget.MaxCriticalPRs > 0 && stats.RiskBudget.TotalCriticalPRs > stats.RiskBudget.MaxCriticalPRs {
+			isExceeded = true
+		}
+		if isExceeded {
+			stats.RiskBudget.Status = "EXCEEDED"
+		} else if (stats.RiskBudget.MonthlyRiskPoints > 0 && stats.RiskBudget.BurnRate >= stats.RiskBudget.BurnRateAlertRatio) || stats.RiskBudget.UtilizationPercent >= 80.0 {
+			stats.RiskBudget.Status = "ELEVATED"
+		} else {
+			stats.RiskBudget.Status = "HEALTHY"
+		}
+	}
 }
 
 // PopulateSARIF adds the PR analysis rules and results to a SARIF builder.
@@ -350,6 +393,7 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 	builder.AddRule(RulePRReviewers)
 	builder.AddRule(RulePRCILatency)
 	builder.AddRule(RulePRCIFlakiness)
+	builder.AddRule(RulePRRiskBudgetExceeded)
 
 	maxLines := 800
 	staleDays := 14
@@ -562,6 +606,50 @@ func (stats *PRStats) PopulateSARIF(builder *sarif.Builder) {
 					map[string]any{"checkName": f.Name, "retries": f.RetryCount, "initialResult": f.InitialResult, "finalResult": f.FinalResult},
 				)
 			}
+		}
+	}
+
+	if stats.RiskBudget != nil && stats.RiskBudget.Enabled {
+		if stats.RiskBudget.Status == "EXCEEDED" || stats.RiskBudget.Status == "ELEVATED" {
+			level := "warning"
+			if stats.RiskBudget.Status == "EXCEEDED" {
+				level = "error"
+			}
+			builder.AddResult(
+				RulePRRiskBudgetExceeded.ID,
+				level,
+				fmt.Sprintf("PR risk budget alert [%s]: Current cumulative risk is %d/%d points (%.1f%% utilization, burn rate %.2fx, %d/%d critical PRs in %d-day window).",
+					stats.RiskBudget.Status,
+					stats.RiskBudget.TotalProjectedPoints,
+					stats.RiskBudget.MonthlyRiskPoints,
+					stats.RiskBudget.UtilizationPercent,
+					stats.RiskBudget.BurnRate,
+					stats.RiskBudget.TotalCriticalPRs,
+					stats.RiskBudget.MaxCriticalPRs,
+					stats.RiskBudget.WindowDays,
+				),
+				fmt.Sprintf("### 📉 PR Risk Budget & SRE SLO Burn Rate Alert\n\n- **Status:** `%s`\n- **Budget Utilization:** `%.1f%%` (%d / %d points)\n- **SLO Burn Rate:** `%.2fx` (alert threshold: `%.2fx`)\n- **Critical PRs:** `%d` / `%d` allowed in %d-day rolling window\n\nMerging this pull request accelerates risk budget exhaustion or exceeds the squad's allocated deployment risk budget.\n\n**Recommendation:** De-scope changes, introduce automated unit/integration tests to reduce risk score, or split into smaller increments.",
+					stats.RiskBudget.Status,
+					stats.RiskBudget.UtilizationPercent,
+					stats.RiskBudget.TotalProjectedPoints,
+					stats.RiskBudget.MonthlyRiskPoints,
+					stats.RiskBudget.BurnRate,
+					stats.RiskBudget.BurnRateAlertRatio,
+					stats.RiskBudget.TotalCriticalPRs,
+					stats.RiskBudget.MaxCriticalPRs,
+					stats.RiskBudget.WindowDays,
+				),
+				stats.PrimaryFile,
+				1,
+				map[string]any{
+					"status":             stats.RiskBudget.Status,
+					"utilizationPercent": stats.RiskBudget.UtilizationPercent,
+					"burnRate":           stats.RiskBudget.BurnRate,
+					"projectedPoints":    stats.RiskBudget.TotalProjectedPoints,
+					"monthlyBudget":      stats.RiskBudget.MonthlyRiskPoints,
+					"criticalPRCount":    stats.RiskBudget.TotalCriticalPRs,
+				},
+			)
 		}
 	}
 }

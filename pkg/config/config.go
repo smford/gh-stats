@@ -16,6 +16,7 @@ type Config struct {
 	BlastRadius BlastRadiusConfig `yaml:"blast_radius"`
 	Ignore      IgnoreConfig      `yaml:"ignore"`
 	Export      ExportConfig      `yaml:"export"`
+	RiskBudget  RiskBudgetConfig  `yaml:"risk_budget"`
 	FailOn      string            `yaml:"fail_on"`
 }
 
@@ -76,6 +77,20 @@ type IgnoreConfig struct {
 	Paths []string `yaml:"paths"`
 }
 
+// RiskBudgetConfig defines SRE risk budget and SLO burn rate thresholds.
+type RiskBudgetConfig struct {
+	Enabled            bool    `yaml:"enabled"`               // Whether risk budget tracking is active
+	MonthlyRiskPoints  int     `yaml:"monthly_risk_points"`   // Total cumulative risk points allowed per rolling window (e.g. 500)
+	WindowDays         int     `yaml:"window_days"`           // Rolling audit window in days (default 30)
+	MaxCriticalPRs     int     `yaml:"max_critical_prs"`      // Max allowed CRITICAL PRs (score >= 80) in window (e.g. 2)
+	BurnRateAlertRatio float64 `yaml:"burn_rate_alert_ratio"`  // Burn rate threshold triggering alerts (default 1.0)
+}
+
+// IsEnabled returns true if risk budget tracking is explicitly enabled or configured.
+func (r RiskBudgetConfig) IsEnabled() bool {
+	return r.Enabled || r.MonthlyRiskPoints > 0 || r.MaxCriticalPRs > 0
+}
+
 // DefaultConfig returns baseline SRE configurations.
 func DefaultConfig() *Config {
 	return &Config{
@@ -96,6 +111,13 @@ func DefaultConfig() *Config {
 			Paths: make([]string, 0),
 		},
 		Export: ExportConfig{},
+		RiskBudget: RiskBudgetConfig{
+			Enabled:            false,
+			MonthlyRiskPoints:  0,
+			WindowDays:         30,
+			MaxCriticalPRs:     0,
+			BurnRateAlertRatio: 1.0,
+		},
 	}
 }
 
@@ -152,6 +174,15 @@ func LoadConfig(customPath, repoDir string) (*Config, error) {
 	}
 	if cfg.Thresholds.CommitLimit <= 0 {
 		cfg.Thresholds.CommitLimit = 200
+	}
+	if cfg.RiskBudget.WindowDays <= 0 {
+		cfg.RiskBudget.WindowDays = 30
+	}
+	if cfg.RiskBudget.BurnRateAlertRatio <= 0 {
+		cfg.RiskBudget.BurnRateAlertRatio = 1.0
+	}
+	if cfg.RiskBudget.MonthlyRiskPoints > 0 || cfg.RiskBudget.MaxCriticalPRs > 0 {
+		cfg.RiskBudget.Enabled = true
 	}
 
 	return cfg, nil

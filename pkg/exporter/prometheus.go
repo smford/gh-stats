@@ -95,6 +95,17 @@ func GeneratePrometheusMetrics(payload *DORAMetricsPayload) string {
 			writeMetric("gh_stats_ci_runs_total", "Total number of evaluated CI check runs", "counter", float64(ci.TotalCheckRuns), prExtra)
 			writeMetric("gh_stats_ci_runs_failed_total", "Number of failed CI check runs", "counter", float64(ci.FailedRuns), prExtra)
 		}
+
+		if pr.RiskBudget != nil {
+			rbExtra := make(map[string]string)
+			for k, v := range prExtra {
+				rbExtra[k] = v
+			}
+			rbExtra["status"] = pr.RiskBudget.Status
+			writeMetric("gh_stats_risk_budget_utilization_percent", "SRE risk budget utilization percentage for rolling window", "gauge", pr.RiskBudget.UtilizationPercent, rbExtra)
+			writeMetric("gh_stats_risk_budget_burn_rate", "SRE SLO risk budget burn rate relative to sustainable pace", "gauge", pr.RiskBudget.BurnRate, rbExtra)
+			writeMetric("gh_stats_risk_budget_points_total", "Cumulative projected risk points in rolling window", "gauge", float64(pr.RiskBudget.TotalProjectedPoints), prExtra)
+		}
 	}
 
 	// 2. Target: Release
