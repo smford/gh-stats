@@ -129,6 +129,13 @@
         </div>
 
         <div class="card">
+          <div class="card-icon">📉</div>
+          <h3>PR Risk Budget & SLO Burn Rate</h3>
+          <p>Tracks cumulative risk points against a monthly squad budget across a rolling git window. Computes SLO burn rates, utilization %, and halts merges when budget is depleted.</p>
+          <span class="card-tag">SRE SLO Tracking</span>
+        </div>
+
+        <div class="card">
           <div class="card-icon">📈</div>
           <h3>Native OTel & Prometheus Exporter</h3>
           <p>Dispatches standard Prometheus text exposition format metrics (<code>.prom</code>) and OpenTelemetry OTLP HTTP JSON payloads directly to Grafana, Datadog, and OTel collectors with zero external dependencies.</p>
@@ -691,6 +698,12 @@ jobs:
               <td><span class="risk-level-badge risk-high">WARNING</span></td>
               <td>PR</td>
               <td>Check run failed initially but passed on retry on the exact same commit SHA without code changes.</td>
+            </tr>
+            <tr>
+              <td class="rule-code">GHSTATS010-RISK-BUDGET-EXCEEDED</td>
+              <td><span class="risk-level-badge risk-crit">ERROR</span></td>
+              <td>PR</td>
+              <td>Squad PR risk budget or critical PR limit exceeded in rolling window, burning risk points too fast.</td>
             </tr>
             <tr>
               <td class="rule-code">GHSTATS101-REPO-SUMMARY</td>

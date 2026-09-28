@@ -33,8 +33,18 @@ ignore:
 # Options: LOW, MEDIUM, HIGH, CRITICAL
 # fail_on: "CRITICAL"
 
-# DORA & SRE Observability telemetry export
+# SRE PR Risk Budget & SLO Burn Rate Tracking
+# risk_budget:
+#   enabled: true                 # Enable rolling PR risk budget tracking
+#   monthly_risk_points: 500      # Monthly risk point allocation for squad
+#   window_days: 30               # Rolling evaluation window in days (default: 30)
+#   max_critical_prs: 2           # Maximum allowed CRITICAL PRs in rolling window
+#   burn_rate_alert_ratio: 1.0    # Burn rate alert multiplier (1.0 = consuming budget at expected speed)
+
+# SRE Observability telemetry export (DORA, Prometheus, OpenTelemetry OTLP)
 # export:
 #   json_path: "metrics.json"
+#   prom_path: "metrics.prom"
+#   otel_endpoint: "http://otel-collector:4318/v1/metrics"
 #   webhook_url: "https://metrics.internal/v1/dora"
 #   webhook_secret: "secret-token"

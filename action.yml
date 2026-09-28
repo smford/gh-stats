@@ -78,6 +78,22 @@ inputs:
     description: 'Fail workflow if flaky CI checks are detected on the PR'
     required: false
     default: 'false'
+  risk-budget-points:
+    description: 'Monthly SRE risk budget points for rolling window (overrides config file)'
+    required: false
+    default: '0'
+  risk-budget-window:
+    description: 'Rolling audit window in days for PR risk budget (default 30)'
+    required: false
+    default: '30'
+  risk-budget-max-critical:
+    description: 'Maximum allowed CRITICAL risk PRs in rolling window'
+    required: false
+    default: '0'
+  fail-on-risk-budget:
+    description: 'Fail workflow if squad PR risk budget is exceeded'
+    required: false
+    default: 'false'
   suggested-bump:
     description: 'Calculate and output recommended next Semantic Version bump and version string'
     required: false
@@ -168,6 +184,18 @@ outputs:
   release-url:
     description: 'HTML URL of the published or updated GitHub Release'
     value: ${{ steps.run-stats.outputs.release-url }}
+  risk-budget-utilization:
+    description: 'PR risk budget utilization percentage for the rolling window'
+    value: ${{ steps.run-stats.outputs.risk-budget-utilization }}
+  risk-budget-burn-rate:
+    description: 'SRE SLO risk budget burn rate relative to sustainable consumption pace'
+    value: ${{ steps.run-stats.outputs.risk-budget-burn-rate }}
+  risk-budget-status:
+    description: 'Risk budget status ("HEALTHY", "ELEVATED", or "EXCEEDED")'
+    value: ${{ steps.run-stats.outputs.risk-budget-status }}
+  risk-budget-points-used:
+    description: 'Total projected risk points consumed including the current PR'
+    value: ${{ steps.run-stats.outputs.risk-budget-points-used }}
   target:
     description: 'Resolved target mode (pr, repo, or release)'
     value: ${{ steps.run-stats.outputs.target }}
@@ -201,6 +229,10 @@ runs:
         INPUT_WEBHOOK_SECRET: ${{ inputs.webhook-secret }}
         INPUT_MAX_CI_LATENCY: ${{ inputs.max-ci-latency }}
         INPUT_FAIL_ON_FLAKY: ${{ inputs.fail-on-flaky }}
+        INPUT_RISK_BUDGET_POINTS: ${{ inputs.risk-budget-points }}
+        INPUT_RISK_BUDGET_WINDOW: ${{ inputs.risk-budget-window }}
+        INPUT_RISK_BUDGET_MAX_CRITICAL: ${{ inputs.risk-budget-max-critical }}
+        INPUT_FAIL_ON_RISK_BUDGET: ${{ inputs.fail-on-risk-budget }}
         INPUT_SUGGEST_BUMP: ${{ inputs.suggested-bump }}
         INPUT_PUBLISH_RELEASE_NOTES: ${{ inputs.publish-release-notes }}
         INPUT_RELEASE_TAG: ${{ inputs.release-tag }}

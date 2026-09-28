@@ -198,6 +198,16 @@ func BuildOTLPMetricsPayload(payload *DORAMetricsPayload) *OTLPMetricsPayload {
 				otlpSumInt("gh_stats.ci.check_runs", "Total number of evaluated CI check runs", "runs", int64(ci.TotalCheckRuns), timeNano, attrs),
 			)
 		}
+
+		if pr.RiskBudget != nil {
+			rbAttrs := append([]OTLPAttribute{}, attrs...)
+			rbAttrs = append(rbAttrs, otlpStringAttr("status", pr.RiskBudget.Status))
+			metrics = append(metrics,
+				otlpGaugeDouble("gh_stats.risk_budget.utilization", "SRE risk budget utilization percentage", "%", pr.RiskBudget.UtilizationPercent, timeNano, rbAttrs),
+				otlpGaugeDouble("gh_stats.risk_budget.burn_rate", "SRE SLO risk budget burn rate", "1", pr.RiskBudget.BurnRate, timeNano, rbAttrs),
+				otlpGaugeInt("gh_stats.risk_budget.projected_points", "Total cumulative projected risk points", "points", int64(pr.RiskBudget.TotalProjectedPoints), timeNano, attrs),
+			)
+		}
 	}
 
 	// 2. Target: Release

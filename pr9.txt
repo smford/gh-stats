@@ -1,51 +1,44 @@
-feat: native OpenTelemetry (OTel) and Prometheus metric export capabilities
+feat: PR risk budget & SRE SLO burn rate tracking
 
 ## Summary
-This PR adds native OpenTelemetry (OTel) and Prometheus metric export capabilities to `gh-stats`, enabling engineering organizations to export PR, Release, Repository, and Environment Drift reliability metrics directly into modern observability platforms (Grafana, Mimir, Datadog, Prometheus Pushgateway, and OTel Collectors).
+Introduces automated Pull Request Risk Budget and SRE Service Level Objective (SLO) burn rate tracking to `gh-stats`. Engineering squads can now treat change risk like an error budget: monitoring cumulative risk points merged over a rolling window (e.g. 30 days), calculating real-time SLO burn rates, and enforcing automated quality gates before runaway risk leads to production outages.
 
-All metric exposition logic is built using the Go standard library with zero external dependencies, maintaining sub-second execution speeds and lean binary distribution. In addition, the GitHub Pages documentation and feature showcases have been comprehensively updated.
+## Key Changes
+- **Configuration (`pkg/config` & `.gh-stats.yml`):**
+Added `risk_budget` block with options:
+`enabled`: toggle rolling risk budget analysis
+`monthly_risk_points`: squad risk point allocation (e.g. 500 pts)
+`window_days`: rolling historical evaluation window (default: 30 days)
+`max_critical_prs`: maximum allowable CRITICAL PRs (score >= 75) in the window
+`burn_rate_alert_ratio`: alert multiplier (default: 1.0x)
 
-### Key Capabilities
-1. Prometheus Text Exposition Format (`--export-prom=metrics.prom`):
-- Formats metrics in standard Prometheus text representation with `# HELP` and `# TYPE` declarations.
-- Emits gauges and counters for PR lead time (`gh_stats_pr_lead_time_seconds`), SRE risk score (`gh_stats_pr_risk_score`), lines added/deleted/net (`gh_stats_pr_lines_*`), CI pipeline latency (`gh_stats_ci_latency_seconds`), flaky check runs count (`gh_stats_ci_flaky_checks_total`), release breaking changes count (`gh_stats_release_breaking_changes_total`), release deployment risk score (`gh_stats_release_risk_score`), environment drift commit divergence (`gh_stats_drift_commits_ahead`, `gh_stats_drift_commits_behind`), and drift risk score (`gh_stats_drift_risk_score`).
-- Labels include repository slug, target scope, ref, and commit metadata.
-- Supports file output for direct scraping, Prometheus Pushgateway ingestion, or textfile collector aggregation.
-2. OpenTelemetry OTLP HTTP Export (`--export-otel-endpoint=http://otel-collector:4318/v1/metrics`):
-- Dispatches standard OTLP JSON metrics over HTTP POST (`application/json`) to any OpenTelemetry collector, Grafana Cloud OTLP gateway, or Datadog OTLP ingest endpoint.
-- Maps gauges and cumulative sum metrics with Unix nanosecond timestamps into resource and scope metrics.
-- Supports custom headers via `--export-otel-headers` or `otel_headers` configuration (e.g. `Authorization`, `X-Scope-OrgID`, `dd-api-key`).
-3. GitHub Action & Configuration Integration:
-- Action inputs: `export-prom`, `export-otel-endpoint`, and `export-otel-headers`.
-- Action outputs: `metrics-prom` (file path) and `otel-status` (`success` or `failure`).
-- Config file (`.gh-stats.yml`): `export.prom_path`, `export.export_prom`, `export.otel_endpoint`, `export.export_otel_endpoint`, and `export.otel_headers`.
-4. Observability Documentation & Guide:
-- Expanded `README.md` with Grafana / Prometheus / Pushgateway, OpenTelemetry Collector, and Datadog ingestion examples.
-- Added metric reference table and updated CLI flags list.
-5. GitHub Pages Documentation & Features Site:
-- Updated `docs/index.html` navigation with direct anchor links to Drift Audit and Observability sections.
-- Added feature showcase cards for Native OTel & Prometheus Exporter, Environment Drift & Promotion Audit, Deterministic SemVer Bump, and Automated Release Notes Publishing.
-- Added interactive demo preview tabs for Prometheus & OTel Metrics and Environment Drift Audit.
-- Added dedicated documentation sections for `#drift-mode` and `#observability`.
-- Added SARIF rules `GHSTATS301` through `GHSTATS304` to the searchable rules reference table.
-6. Example Workflow:
-- Added `.github/workflows/test-metric-export.yml` supporting manual dispatch and artifact archiving.
+- **Git History Telemetry (`pkg/gitutil`):**
+Added `GetMergedPRHistory(baseRef, since)` and `ParseMergedPRHistory` to mine merged PR commits, timestamps, and line diff stats along `--first-parent -m` without external database dependencies.
 
-## Changes
-- `pkg/config/config.go`: Added `PromPath`, `ExportProm`, `OTelEndpoint`, `ExportOTelEndpoint`, and `OTelHeaders` to `ExportConfig` with helper methods `GetPromPath()` and `GetOTelEndpoint()`.
-- `pkg/config/config_test.go`: Added tests validating YAML parsing and aliases for Prometheus and OTel export settings.
-- `pkg/exporter/prometheus.go`: Implemented `GeneratePrometheusMetrics()` and `ExportPrometheus()`.
-- `pkg/exporter/prometheus_test.go`: Added unit tests verifying Prometheus metric syntax, comments, types, and label formatting for PR, Release, and Drift payloads.
-- `pkg/exporter/otlp.go`: Implemented standard OTLP HTTP JSON payload serialization (`BuildOTLPMetricsPayload`), header parsing (`ParseOTLPHeaders`), and HTTP dispatch (`ExportOTLP`).
-- `pkg/exporter/otlp_test.go`: Added tests verifying OTLP JSON serialization, header parsing, HTTP endpoint posting, and error propagation.
-- `cmd/gh-stats/main.go`: Added CLI flags `--export-prom`, `--export-otel-endpoint`, `--export-otel-headers`, config resolution, export execution, and GitHub Action step outputs.
-- `action.yml`: Exposed `export-prom`, `export-otel-endpoint`, and `export-otel-headers` inputs, and `metrics-prom` and `otel-status` outputs.
-- `README.md`: Added documentation for Prometheus and OpenTelemetry exporters, ingestion examples for Prometheus/Pushgateway, Grafana Cloud, and Datadog, updated configuration examples, and CLI flags list.
-- `docs/index.html`: Added Observability and Drift Audit feature cards, interactive tabs, documentation sections, navigation links, and SARIF rules reference entries.
-- `.github/workflows/test-metric-export.yml`: Added manual demonstration workflow for metric export.
+- **Risk Budget & SLO Burn Engine (`pkg/analyzer`):**
+Added `CalculateHistoricalCommitRisk` to score historical merged PRs based on size, test-to-code velocity, and sensitive file blast radius.
+Added `EvaluateRiskBudget` to project total cumulative points (`Historical + Current PR`), compute utilization percentage, and derive observed SLO burn rate:
+`Burn Rate = (Observed Daily Risk Points) / (Sustainable Daily Budget Rate)`
+Computes squad status: `HEALTHY`, `ELEVATED` (>=80% budget or burn >= alert ratio), and `EXCEEDED` (>100% budget or exceeded critical PR limit).
+Added SARIF rule `RulePRRiskBudgetExceeded` (`GHSTATS010-RISK-BUDGET-EXCEEDED`) with error severity when budget is depleted.
+
+- **Markdown Step Summary (`pkg/reporter`):**
+Added `## 📉 PR Risk Budget & SRE SLO Burn Rate` section featuring status badges, utilization %, burn rate multiplier, critical PR counter, and a recent merged PR breakdown table.
+
+- **CLI & Action Integration (`cmd/gh-stats`, `action.yml`):**
+Added CLI flags: `--risk-budget-points`, `--risk-budget-window`, `--risk-budget-max-critical`, and `--fail-on-risk-budget`.
+Exposed GitHub Action inputs and step outputs: `risk-budget-utilization`, `risk-budget-burn-rate`, `risk-budget-status`, `risk-budget-points-used`.
+Enforced quality gating in `cmd/gh-stats` to fail the run when `--fail-on-risk-budget` is set and status is `EXCEEDED`.
+
+- **Metrics & Observability (`pkg/exporter`):**
+Added Prometheus gauges (`gh_stats_risk_budget_utilization_percent`, `gh_stats_risk_budget_burn_rate`, `gh_stats_risk_budget_points_total`) and OTLP metrics telemetry.
+
+- **Documentation & Web Playground (`README.md`, `docs/index.html`):**
+Documented risk budgeting architecture, configuration examples, and CLI flags in `README.md`.
+Added feature card and updated SARIF rules table in `docs/index.html`.
 
 ## Verification
-- `go test -count=1 -race ./...` (All packages pass with race detector enabled)
-- `go vet ./...` (Passed with zero issues)
-- `shellcheck scripts/*.sh examples/hooks/*` (Clean, zero issues)
-- Synthetic release and drift tests (`test-synthetic-release.sh`, `test-synthetic-drift.sh`) passed with zero errors
+- `go test -count=1 -race ./...` (All packages pass with 100% success)
+- `go vet ./...` (Clean, zero issues)
+- `shellcheck scripts/*.sh examples/hooks/*` (Clean, zero warnings)
+- Added comprehensive unit tests in `pkg/analyzer/risk_budget_test.go`, `pkg/config/config_test.go`, `pkg/gitutil/git_test.go`, and `pkg/reporter/markdown_test.go`.

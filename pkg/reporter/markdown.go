@@ -141,6 +141,83 @@ func GeneratePRSummary(stats *analyzer.PRStats) string {
 		}
 	}
 
+	if stats.RiskBudget != nil && stats.RiskBudget.Enabled {
+		sb.WriteString("\n## 📉 PR Risk Budget & SRE SLO Burn Rate\n\n")
+
+		switch stats.RiskBudget.Status {
+		case "EXCEEDED":
+			sb.WriteString(fmt.Sprintf("> 🚨 **Risk Budget Exceeded:** Squad risk budget is **%.1f%%** utilized with SLO burn rate **%.2fx**!\n\n",
+				stats.RiskBudget.UtilizationPercent, stats.RiskBudget.BurnRate))
+		case "ELEVATED":
+			sb.WriteString(fmt.Sprintf("> ⚠️ **Risk Budget Warning:** Squad risk budget is burning at **%.2fx** sustainable rate (**%.1f%%** utilized).\n\n",
+				stats.RiskBudget.BurnRate, stats.RiskBudget.UtilizationPercent))
+		default:
+			sb.WriteString(fmt.Sprintf("> ✅ **Risk Budget Healthy:** Squad risk budget is **%.1f%%** utilized (burn rate **%.2fx**).\n\n",
+				stats.RiskBudget.UtilizationPercent, stats.RiskBudget.BurnRate))
+		}
+
+		sb.WriteString("| Metric | Value | Budget Limit | Status |\n")
+		sb.WriteString("| :--- | :--- | :--- | :--- |\n")
+		sb.WriteString(fmt.Sprintf("| **Rolling Window** | `%d days` | `%d days` | ℹ️ Active Window |\n",
+			stats.RiskBudget.WindowDays, stats.RiskBudget.WindowDays))
+
+		utilStatus := "✅ Normal"
+		if stats.RiskBudget.UtilizationPercent >= 100.0 {
+			utilStatus = "🚨 **Exceeded**"
+		} else if stats.RiskBudget.UtilizationPercent >= 80.0 {
+			utilStatus = "⚠️ Elevated"
+		}
+		sb.WriteString(fmt.Sprintf("| **Cumulative Risk Points** | `%d pts` (Historical: `%d` + This PR: `%d`) | `%d pts` | %s (%.1f%%) |\n",
+			stats.RiskBudget.TotalProjectedPoints, stats.RiskBudget.HistoricalPoints, stats.RiskBudget.CurrentPRPoints,
+			stats.RiskBudget.MonthlyRiskPoints, utilStatus, stats.RiskBudget.UtilizationPercent))
+
+		burnStatus := "✅ Healthy Pace"
+		if stats.RiskBudget.BurnRate >= stats.RiskBudget.BurnRateAlertRatio*1.5 {
+			burnStatus = "🚨 **Critical Burn**"
+		} else if stats.RiskBudget.BurnRate >= stats.RiskBudget.BurnRateAlertRatio {
+			burnStatus = "⚠️ Elevated Burn"
+		}
+		sb.WriteString(fmt.Sprintf("| **SLO Burn Rate** | `%.2fx` | `%.2fx max` | %s |\n",
+			stats.RiskBudget.BurnRate, stats.RiskBudget.BurnRateAlertRatio, burnStatus))
+
+		if stats.RiskBudget.MaxCriticalPRs > 0 {
+			critStatus := "✅ Within Budget"
+			if stats.RiskBudget.TotalCriticalPRs > stats.RiskBudget.MaxCriticalPRs {
+				critStatus = "🚨 **Budget Depleted**"
+			} else if stats.RiskBudget.TotalCriticalPRs == stats.RiskBudget.MaxCriticalPRs {
+				critStatus = "⚠️ At Limit"
+			}
+			thisPRCrit := 0
+			if stats.RiskBudget.IsCurrentPRCritical {
+				thisPRCrit = 1
+			}
+			sb.WriteString(fmt.Sprintf("| **Critical PRs (Score ≥75)** | `%d` merged (+`%d` this PR) | `%d max` | %s |\n",
+				stats.RiskBudget.HistoricalCriticalPRs, thisPRCrit, stats.RiskBudget.MaxCriticalPRs, critStatus))
+		}
+
+		sb.WriteString(fmt.Sprintf("| **Merged PRs in Window** | `%d` PRs | - | ℹ️ Historical Velocity |\n",
+			stats.RiskBudget.HistoricalPRCount))
+
+		if len(stats.RiskBudget.MergedPRs) > 0 {
+			sb.WriteString("\n### 📜 Recent Merged PRs in Window\n\n")
+			sb.WriteString("| Commit / PR | Author | Merged | Changes | Risk Score |\n")
+			sb.WriteString("| :--- | :--- | :--- | :--- | :---: |\n")
+			limit := 5
+			if len(stats.RiskBudget.MergedPRs) < limit {
+				limit = len(stats.RiskBudget.MergedPRs)
+			}
+			for i := 0; i < limit; i++ {
+				m := stats.RiskBudget.MergedPRs[i]
+				hashShort := m.Hash
+				if len(hashShort) > 7 {
+					hashShort = hashShort[:7]
+				}
+				sb.WriteString(fmt.Sprintf("| `%s` %s | %s | %s | `+%d / -%d` | `%d` (%s) |\n",
+					hashShort, m.Subject, m.Author, m.MergedAt.Format("Jan 02"), m.Additions, m.Deletions, m.RiskScore, m.RiskLevel))
+			}
+		}
+	}
+
 	return sb.String()
 }
 

@@ -199,4 +199,64 @@ func TestGenerateDriftSummary(t *testing.T) {
 	}
 }
 
+func TestGeneratePRSummary_RiskBudget(t *testing.T) {
+	stats := &analyzer.PRStats{
+		TotalAdditions: 120,
+		TotalDeletions: 30,
+		NetChange:      90,
+		FilesChanged:   4,
+		RiskLevel:      "HIGH",
+		RiskScore:      70,
+		RiskBudget: &analyzer.RiskBudgetStats{
+			Enabled:              true,
+			MonthlyRiskPoints:    500,
+			WindowDays:           30,
+			MaxCriticalPRs:       2,
+			BurnRateAlertRatio:   1.0,
+			HistoricalPoints:     450,
+			HistoricalPRCount:    12,
+			HistoricalCriticalPRs: 2,
+			CurrentPRPoints:      70,
+			IsCurrentPRCritical:  false,
+			TotalProjectedPoints: 520,
+			TotalCriticalPRs:     2,
+			UtilizationPercent:   104.0,
+			BurnRate:             1.85,
+			Status:               "EXCEEDED",
+			DaysSpan:             16.5,
+			MergedPRs: []analyzer.MergedPRRiskInfo{
+				{
+					Hash:       "deadbeef",
+					Subject:    "feat: major payment migration",
+					Author:     "Alice",
+					MergedAt:   time.Now().AddDate(0, 0, -5),
+					Additions:  400,
+					Deletions:  50,
+					FilesCount: 6,
+					RiskScore:  85,
+					RiskLevel:  "CRITICAL",
+				},
+			},
+		},
+	}
+
+	summary := GeneratePRSummary(stats)
+
+	if !strings.Contains(summary, "PR Risk Budget & SRE SLO Burn Rate") {
+		t.Errorf("expected Risk Budget section in summary, got: %s", summary)
+	}
+	if !strings.Contains(summary, "Risk Budget Exceeded") {
+		t.Errorf("expected Risk Budget Exceeded status in summary, got: %s", summary)
+	}
+	if !strings.Contains(summary, "104.0%") {
+		t.Errorf("expected utilization percent in summary, got: %s", summary)
+	}
+	if !strings.Contains(summary, "1.85x") {
+		t.Errorf("expected burn rate in summary, got: %s", summary)
+	}
+	if !strings.Contains(summary, "deadbee") || !strings.Contains(summary, "major payment migration") {
+		t.Errorf("expected recent merged PR details in table, got: %s", summary)
+	}
+}
+
 

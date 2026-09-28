@@ -150,6 +150,10 @@ jobs:
 | `comment-pr` | Post or update a live sticky Markdown summary comment on the PR conversation thread | `'false'` | No |
 | `fail-on` | Enforce risk budget gating: fail job if PR, release, or drift risk meets/exceeds threshold (`'CRITICAL'`, `'HIGH'`, `'MEDIUM'`, `'LOW'`) | `''` (disabled) | No |
 | `config-path` | Path to `.gh-stats.yml` configuration file (auto-discovers `.gh-stats.yml` or `.github/.gh-stats.yml` if omitted) | `''` | No |
+| `risk-budget-points` | Monthly risk points budget allocation (overrides config `monthly_risk_points`) | `0` (from config) | No |
+| `risk-budget-window` | Rolling evaluation window in days (default: 30) | `30` | No |
+| `risk-budget-max-critical` | Maximum allowed CRITICAL PRs in rolling window | `0` (from config) | No |
+| `fail-on-risk-budget` | Fail quality gate if squad risk budget is exceeded | `'false'` | No |
 | `export-json` | File path to export structured DORA & SRE metrics in JSON format | `''` (disabled) | No |
 | `export-prom` | File path to export Prometheus text exposition format metrics (`.prom`) | `''` (disabled) | No |
 | `export-otel-endpoint` | OpenTelemetry OTLP HTTP metrics endpoint URL (e.g. `http://otel-collector:4318/v1/metrics`) | `''` (disabled) | No |
@@ -166,6 +170,10 @@ jobs:
 | `metrics-json` | Path to the exported metrics JSON file (if `export-json` was enabled) |
 | `metrics-prom` | Path to the exported Prometheus metrics file (if `export-prom` was enabled) |
 | `otel-status` | Dispatch status (`success` or `failure`) of OpenTelemetry OTLP export |
+| `risk-budget-utilization` | Squad risk budget utilization percentage across the rolling window |
+| `risk-budget-burn-rate` | Observed SRE SLO burn rate multiplier relative to sustainable pace |
+| `risk-budget-status` | Risk budget status (`HEALTHY`, `ELEVATED`, `EXCEEDED`) |
+| `risk-budget-points-used` | Projected cumulative risk points consumed in the rolling window |
 | `release-base-ref` | Base git reference used in release comparison mode |
 | `release-head-ref` | Head git reference used in release comparison mode |
 | `release-commits-count` | Total commit count in the release delta |
@@ -187,7 +195,7 @@ jobs:
 ## 🏷️ Generated SARIF Rules & Alerts
 
 | Rule ID | Severity | Scope | Condition |
-| :--- | :---: | :---: | :--- |
+| :--- | :--- :--- | :---: | :--- |
 | `GHSTATS001-PR-SUMMARY` | `note` / `warning` | PR | Overall SRE health scorecard, lines added/deleted, file distribution |
 | `GHSTATS002-PR-SIZE` | `warning` | PR | PR exceeds 800 lines changed (review fatigue & MTTD risk) |
 | `GHSTATS003-PR-TEST-RATIO` | `warning` | PR | >80 lines of production code changed with zero automated test delta |
@@ -197,6 +205,7 @@ jobs:
 | `GHSTATS007-PR-REVIEWERS` | `note` | PR | Historical domain experts recommended to review modified files |
 | `GHSTATS008-PR-CI-LATENCY` | `warning` | PR | CI pipeline check run exceeds latency threshold |
 | `GHSTATS009-PR-CI-FLAKINESS` | `warning` | PR | CI check run failed and then passed on retry on the same commit SHA |
+| `GHSTATS010-RISK-BUDGET-EXCEEDED` | `warning` / `error` | PR | Squad PR risk budget or critical PR limit exceeded in rolling window |
 | `GHSTATS101-REPO-SUMMARY` | `note` | Repo | Architecture overview, test density %, language breakdown |
 | `GHSTATS102-REPO-HOTSPOTS` | `note` | Repo | High-churn files identified across commit history |
 | `GHSTATS103-REPO-BUS-FACTOR` | `warning` | Repo | Single contributor accounts for >75% of commits |
@@ -330,6 +339,9 @@ Push exported Prometheus metrics to a Prometheus Pushgateway or expose via textf
 | `gh_stats_drift_risk_score` | Gauge | Promotion deployment risk score (0-100) |
 | `gh_stats_drift_commits_ahead` | Gauge | Candidate commits awaiting promotion |
 | `gh_stats_drift_commits_behind` | Gauge | Missing upstream commits behind target |
+| `gh_stats_risk_budget_utilization_percent` | Gauge | Rolling risk budget utilization percentage (0-100+) |
+| `gh_stats_risk_budget_burn_rate` | Gauge | Observed risk budget SLO burn rate multiplier |
+| `gh_stats_risk_budget_points_total` | Gauge | Cumulative projected risk points in rolling window |
 
 #### 2. OpenTelemetry (OTel Collector & Grafana Cloud)
 Dispatch OTLP JSON directly to an OpenTelemetry Collector or Grafana Cloud OTLP Gateway:
@@ -702,6 +714,62 @@ jobs:
 
 ---
 
+## 📉 PR Risk Budget & SRE SLO Burn Rate Tracking
+
+Just like production reliability error budgets in Google SRE methodology, engineering squads have a **Pull Request Risk Budget**. Merging high-risk changes, complex database schema overhauls, or massive refactors in quick succession without sufficient soak time leads directly to production outages and regression spikes.
+
+`gh-stats` brings automated SRE risk budgeting and SLO burn rate tracking to GitHub:
+
+- **Rolling Git Window History:** Scans historical merged PR commits on the base branch across a configurable rolling window (e.g. `30 days`) using native git log numstat analysis with zero external database requirements.
+- **Historical Cumulative Risk Points:** Computes SRE risk points for every merged commit based on churn volume, test-to-code velocity, and blast radius on sensitive files.
+- **Predictive Risk Projection:** Adds the incoming PR's risk score to the squad's historical cumulative points:
+  $$\text{Total Projected Points} = \text{Historical Merged Points} + \text{Current PR Score}$$
+- **SRE SLO Burn Rate:**
+  $$\text{Burn Rate} = \frac{\text{Observed Daily Risk Velocity}}{\text{Sustainable Daily Risk Rate}} = \frac{\text{Total Points} / \text{Days Span}}{\text{Monthly Budget} / \text{Window Days}}$$
+  - **`1.0x`**: Squad is consuming risk budget at exactly the sustainable pace.
+  - **`>1.0x`**: Risk budget is burning faster than normal (accelerated velocity or batch risk).
+  - **`>1.5x`**: Critical burn rate requiring squad cooldown or manager architectural review.
+- **Critical PR Caps (`max_critical_prs`):** Restricts the number of `CRITICAL` risk PRs (score ≥75) allowed within the rolling window to prevent multiple destabilizing architectural changes from landing simultaneously.
+- **Automated Quality Gate Gating:** Enforce automated PR blocking via `fail-on-risk-budget: 'true'` or `--fail-on-risk-budget`.
+- **SARIF Rule `GHSTATS010-RISK-BUDGET-EXCEEDED`:** Directly annotates Code Scanning with error-level severity when the squad's risk budget is exhausted.
+
+### Configuration (`.gh-stats.yml`):
+
+```yaml
+risk_budget:
+  enabled: true                 # Enable rolling PR risk budget tracking
+  monthly_risk_points: 500      # Monthly risk point allocation for the squad
+  window_days: 30               # Rolling evaluation window in days (default: 30)
+  max_critical_prs: 2           # Maximum allowed CRITICAL PRs in rolling window
+  burn_rate_alert_ratio: 1.0    # Alert when burning budget faster than sustainable rate
+```
+
+### GitHub Actions Workflow Example:
+
+```yaml
+- name: SRE PR Analysis & Risk Budget Gate
+  uses: smford/gh-stats@main
+  with:
+    target: pr
+    fail-on-risk-budget: 'true'   # Halts merge if squad risk budget is exceeded
+    risk-budget-points: 500
+    risk-budget-window: 30
+    risk-budget-max-critical: 2
+    token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+### CLI Usage:
+
+```bash
+# Evaluate PR against 30-day squad risk budget
+gh-stats --target=pr --base=main --risk-budget-points=500 --risk-budget-window=30
+
+# Fail CLI execution if risk budget is exhausted
+gh-stats --target=pr --base=main --fail-on-risk-budget
+```
+
+---
+
 ## 💻 Local CLI Usage
 
 You can build and run `gh-stats` locally on any git repository:
@@ -782,6 +850,14 @@ gh-stats -version
         Publish or update GitHub release notes with generated SRE summary
   -release-tag string
         GitHub Release tag to publish or update notes for (auto-detected if omitted)
+  -risk-budget-points int
+        Monthly risk budget points allocation for squad (overrides config)
+  -risk-budget-window int
+        Rolling evaluation window in days (default 30)
+  -risk-budget-max-critical int
+        Maximum allowed CRITICAL PRs in rolling window (overrides config)
+  -fail-on-risk-budget
+        Fail quality gate if squad risk budget is exceeded
   -version
         Print gh-stats version and exit
   -quiet
