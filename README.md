@@ -151,6 +151,9 @@ jobs:
 | `fail-on` | Enforce risk budget gating: fail job if PR, release, or drift risk meets/exceeds threshold (`'CRITICAL'`, `'HIGH'`, `'MEDIUM'`, `'LOW'`) | `''` (disabled) | No |
 | `config-path` | Path to `.gh-stats.yml` configuration file (auto-discovers `.gh-stats.yml` or `.github/.gh-stats.yml` if omitted) | `''` | No |
 | `export-json` | File path to export structured DORA & SRE metrics in JSON format | `''` (disabled) | No |
+| `export-prom` | File path to export Prometheus text exposition format metrics (`.prom`) | `''` (disabled) | No |
+| `export-otel-endpoint` | OpenTelemetry OTLP HTTP metrics endpoint URL (e.g. `http://otel-collector:4318/v1/metrics`) | `''` (disabled) | No |
+| `export-otel-headers` | Custom HTTP headers for OTLP export (e.g. `X-Scope-OrgID=123,Authorization=Bearer ...`) | `''` | No |
 | `export-webhook` | HTTP/HTTPS Webhook endpoint to dispatch DORA & SRE metrics payload | `''` (disabled) | No |
 | `webhook-secret` | HMAC-SHA256 signature secret or Bearer token for webhook authentication | `''` | No |
 | `token` | GitHub token for authentication (API stats, sticky comment, SARIF upload) | `${{ github.token }}` | No |
@@ -161,6 +164,8 @@ jobs:
 | :--- | :--- |
 | `sarif-file` | Path to the generated SARIF report file |
 | `metrics-json` | Path to the exported metrics JSON file (if `export-json` was enabled) |
+| `metrics-prom` | Path to the exported Prometheus metrics file (if `export-prom` was enabled) |
+| `otel-status` | Dispatch status (`success` or `failure`) of OpenTelemetry OTLP export |
 | `release-base-ref` | Base git reference used in release comparison mode |
 | `release-head-ref` | Head git reference used in release comparison mode |
 | `release-commits-count` | Total commit count in the release delta |
@@ -246,26 +251,108 @@ fail_on: "HIGH"
 # DORA & SRE Observability Telemetry Exporter
 export:
   json_path: "metrics.json"
+  prom_path: "metrics.prom"
+  otel_endpoint: "http://otel-collector:4318/v1/metrics"
+  otel_headers:
+    Authorization: "Bearer secret-token"
+    X-Scope-OrgID: "engineering"
   webhook_url: "https://metrics.internal/v1/dora"
   webhook_secret: "secret-token"
 ```
 
 ---
 
-## 📊 DORA & SRE Observability Exporter
+## 📊 DORA & SRE Observability Exporter (Prometheus, OpenTelemetry & Webhook)
 
 Track reliability velocity and correlate risk with downstream deployments:
 - **Lead Time for Changes:** PR lifecycle duration from creation to review and merge.
+- **Deployment & Promotion Risk Scoring:** Numerical risk score (0-100) and risk level across PRs, Releases, and Environment Drift.
 - **Change Failure Rate Correlation:** Quantify risk scores against production rollback/incident frequencies.
 - **Test Debt Velocity:** Track test-to-code ratio trends over time across squads.
-- **Webhook Dispatch:** Directly push structured JSON telemetry to Datadog, OpenTelemetry collectors, Grafana, or internal metrics pipelines with optional HMAC-SHA256 verification (`X-Hub-Signature-256`) and Bearer authentication.
+- **CI Pipeline Observability:** Track cumulative check run duration, bottleneck times, and flaky test occurrences.
+- **Zero-Dependency Native Exporters:**
+  - **Prometheus Text Exposition Format (`.prom`):** Standard `# HELP` and `# TYPE` gauges and counters compatible with Prometheus textfile collector, Pushgateway, Grafana Mimir, VictoriaMetrics, and Datadog Prometheus agent.
+  - **Native OpenTelemetry (OTel) OTLP HTTP Export:** Dispatches standard OTLP JSON metrics over HTTP directly to OpenTelemetry Collector (`http://otel-collector:4318/v1/metrics`), Grafana Cloud, Datadog OTLP ingest, or Honeycomb with custom headers.
+  - **JSON & Webhook Dispatch:** Push structured JSON telemetry with optional HMAC-SHA256 verification (`X-Hub-Signature-256`) and Bearer authentication.
+
+### CLI Usage Examples
 
 ```bash
+# Export Prometheus text exposition format
+gh-stats -target=pr -export-prom=metrics.prom
+
+# Export OpenTelemetry metrics over OTLP HTTP
+gh-stats -target=pr \
+  -export-otel-endpoint=http://otel-collector:4318/v1/metrics \
+  -export-otel-headers="Authorization=Bearer my-token,X-Scope-OrgID=prod"
+
 # Export metrics to a JSON file
 gh-stats -target=pr -export-json=metrics.json
 
 # Stream metrics to an observability webhook
 gh-stats -target=pr -export-webhook=https://metrics.internal/v1/dora -webhook-secret="secret-token"
+```
+
+### Ingestion Examples
+
+#### 1. Prometheus & Pushgateway (Grafana Dashboard)
+Push exported Prometheus metrics to a Prometheus Pushgateway or expose via textfile collector for Prometheus/Mimir scraping:
+
+```yaml
+- name: Run gh-stats and Export Prometheus Metrics
+  uses: smford/gh-stats@main
+  with:
+    target: pr
+    export-prom: metrics.prom
+    fail-on: HIGH
+
+- name: Push to Prometheus Pushgateway
+  if: always()
+  run: |
+    if [ -f metrics.prom ]; then
+      curl --data-binary @metrics.prom \
+        "http://pushgateway.monitoring.svc:9091/metrics/job/gh-stats/instance/${{ github.repository }}"
+    fi
+```
+
+**Prometheus Metrics Emitted:**
+| Metric | Type | Description |
+| :--- | :--- | :--- |
+| `gh_stats_pr_risk_score` | Gauge | SRE risk score (0-100) for the PR |
+| `gh_stats_pr_lead_time_seconds` | Gauge | Pull request lifecycle lead time in seconds |
+| `gh_stats_pr_lines_added_total` | Counter | Total lines added in the PR delta |
+| `gh_stats_pr_lines_deleted_total` | Counter | Total lines deleted in the PR delta |
+| `gh_stats_pr_lines_net` | Gauge | Net lines changed in the PR delta |
+| `gh_stats_ci_latency_seconds` | Gauge | Total cumulative CI check runs duration |
+| `gh_stats_ci_flaky_checks_total` | Counter | Number of flaky check runs detected |
+| `gh_stats_release_risk_score` | Gauge | Release deployment risk score (0-100) |
+| `gh_stats_release_breaking_changes_total` | Counter | Breaking changes & migrations in release |
+| `gh_stats_drift_risk_score` | Gauge | Promotion deployment risk score (0-100) |
+| `gh_stats_drift_commits_ahead` | Gauge | Candidate commits awaiting promotion |
+| `gh_stats_drift_commits_behind` | Gauge | Missing upstream commits behind target |
+
+#### 2. OpenTelemetry (OTel Collector & Grafana Cloud)
+Dispatch OTLP JSON directly to an OpenTelemetry Collector or Grafana Cloud OTLP Gateway:
+
+```yaml
+- name: Run gh-stats with OpenTelemetry Export
+  uses: smford/gh-stats@main
+  with:
+    target: release
+    export-otel-endpoint: "https://otlp-gateway-prod-us-east-0.grafana.net/otlp/v1/metrics"
+    export-otel-headers: "Authorization=Basic ${{ secrets.GRAFANA_OTLP_TOKEN }}"
+```
+
+#### 3. Datadog Ingestion
+Stream OTLP metrics directly to Datadog's OTLP HTTP intake endpoint or via a local Datadog Agent:
+
+```yaml
+- name: Run gh-stats with Datadog OTLP Ingest
+  uses: smford/gh-stats@main
+  with:
+    target: pr
+    export-otel-endpoint: "https://otlp.datadoghq.com/v1/metrics"
+    export-otel-headers: "dd-api-key=${{ secrets.DATADOG_API_KEY }}"
 ```
 
 ---
@@ -673,6 +760,12 @@ gh-stats -version
         Post or update a sticky summary comment on the PR
   -export-json string
         Path to export DORA & SRE metrics JSON file
+  -export-prom string
+        Path to export Prometheus text exposition format metrics file
+  -export-otel-endpoint string
+        OpenTelemetry OTLP HTTP metrics endpoint URL (e.g. http://otel-collector:4318/v1/metrics)
+  -export-otel-headers string
+        Custom headers for OTLP HTTP metrics export (key=value,...)
   -export-webhook string
         Webhook URL to export DORA & SRE metrics
   -webhook-secret string
@@ -683,6 +776,12 @@ gh-stats -version
         Fail quality gate if flaky CI checks are detected
   -check-runs
         Fetch CI check runs for latency and flakiness analysis (default true)
+  -suggest-bump
+        Deterministically recommend next semantic version bump and version string
+  -publish-release-notes
+        Publish or update GitHub release notes with generated SRE summary
+  -release-tag string
+        GitHub Release tag to publish or update notes for (auto-detected if omitted)
   -version
         Print gh-stats version and exit
   -quiet

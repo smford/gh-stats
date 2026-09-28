@@ -122,3 +122,49 @@ func TestMatchGlob(t *testing.T) {
 		}
 	}
 }
+
+func TestExportConfigPromAndOTel(t *testing.T) {
+	tmpDir := t.TempDir()
+	yamlContent := `
+export:
+  json_path: "dora.json"
+  prom_path: "metrics.prom"
+  otel_endpoint: "http://otel-collector:4318/v1/metrics"
+  otel_headers:
+    X-API-Key: "secret-key"
+`
+	configPath := filepath.Join(tmpDir, ".gh-stats.yml")
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test config file: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath, tmpDir)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	if cfg.Export.GetPromPath() != "metrics.prom" {
+		t.Errorf("expected prom_path 'metrics.prom', got %q", cfg.Export.GetPromPath())
+	}
+	if cfg.Export.GetOTelEndpoint() != "http://otel-collector:4318/v1/metrics" {
+		t.Errorf("expected otel_endpoint 'http://otel-collector:4318/v1/metrics', got %q", cfg.Export.GetOTelEndpoint())
+	}
+	if cfg.Export.OTelHeaders["X-API-Key"] != "secret-key" {
+		t.Errorf("expected X-API-Key header 'secret-key', got %q", cfg.Export.OTelHeaders["X-API-Key"])
+	}
+
+	// Test aliases export_prom and export_otel_endpoint
+	cfgAliases := &Config{
+		Export: ExportConfig{
+			ExportProm:         "alias.prom",
+			ExportOTelEndpoint: "http://otel-alias:4318/v1/metrics",
+		},
+	}
+	if cfgAliases.Export.GetPromPath() != "alias.prom" {
+		t.Errorf("expected alias.prom, got %q", cfgAliases.Export.GetPromPath())
+	}
+	if cfgAliases.Export.GetOTelEndpoint() != "http://otel-alias:4318/v1/metrics" {
+		t.Errorf("expected http://otel-alias:4318/v1/metrics, got %q", cfgAliases.Export.GetOTelEndpoint())
+	}
+}
+

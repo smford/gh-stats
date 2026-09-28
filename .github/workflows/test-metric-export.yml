@@ -1,0 +1,50 @@
+name: Test OpenTelemetry & Prometheus Metric Export
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target mode to analyze: "repo", "release", or "drift"'
+        required: false
+        default: 'repo'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  test-metric-export:
+    name: Test Prometheus & OTel Export
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+
+      - name: Run gh-stats with Prometheus Export
+        id: run-stats
+        uses: ./
+        with:
+          target: ${{ inputs.target }}
+          export-prom: 'metrics.prom'
+          upload-sarif: 'false'
+
+      - name: Display Emitted Prometheus Metrics
+        run: |
+          echo "### 📈 Emitted Prometheus Metrics" >> "$GITHUB_STEP_SUMMARY"
+          echo '```promql' >> "$GITHUB_STEP_SUMMARY"
+          cat metrics.prom >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Prometheus Metrics Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prometheus-metrics
+          path: metrics.prom

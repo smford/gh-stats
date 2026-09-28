@@ -42,9 +42,12 @@ func main() {
 		flagCommentPR     bool
 		flagQuiet         bool
 		flagVersion       bool
-		flagExportJSON    string
-		flagExportWebhook string
-		flagWebhookSecret string
+		flagExportJSON          string
+		flagExportWebhook       string
+		flagWebhookSecret       string
+		flagExportProm          string
+		flagExportOTelEndpoint  string
+		flagExportOTelHeaders   string
 		flagMaxCILatency        int
 		flagFailOnFlaky         bool
 		flagCheckRuns           bool
@@ -68,6 +71,9 @@ func main() {
 	flag.StringVar(&flagExportJSON, "export-json", getEnvDefault("INPUT_EXPORT_JSON", ""), "Path to export DORA & SRE metrics JSON file")
 	flag.StringVar(&flagExportWebhook, "export-webhook", getEnvDefault("INPUT_EXPORT_WEBHOOK", ""), "Webhook URL to export DORA & SRE metrics")
 	flag.StringVar(&flagWebhookSecret, "webhook-secret", getEnvDefault("INPUT_WEBHOOK_SECRET", os.Getenv("WEBHOOK_SECRET")), "Secret key or bearer token for webhook export")
+	flag.StringVar(&flagExportProm, "export-prom", getEnvDefault("INPUT_EXPORT_PROM", ""), "Path to export Prometheus text exposition format metrics file")
+	flag.StringVar(&flagExportOTelEndpoint, "export-otel-endpoint", getEnvDefault("INPUT_EXPORT_OTEL_ENDPOINT", getEnvDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "")), "OpenTelemetry OTLP HTTP metrics endpoint URL (e.g. http://otel-collector:4318/v1/metrics)")
+	flag.StringVar(&flagExportOTelHeaders, "export-otel-headers", getEnvDefault("INPUT_EXPORT_OTEL_HEADERS", getEnvDefault("OTEL_EXPORTER_OTLP_HEADERS", "")), "Custom headers for OTLP HTTP metrics export (key=value,...)")
 	flag.IntVar(&flagMaxCILatency, "max-ci-latency", 0, "Maximum acceptable CI check latency in minutes (default 15)")
 	flag.BoolVar(&flagFailOnFlaky, "fail-on-flaky", getEnvDefault("INPUT_FAIL_ON_FLAKY", "false") == "true", "Fail quality gate if flaky CI checks are detected")
 	flag.BoolVar(&flagCheckRuns, "check-runs", true, "Fetch CI check runs for latency and flakiness analysis")
@@ -124,6 +130,12 @@ func main() {
 	}
 	if flagWebhookSecret == "" && cfg.Export.WebhookSecret != "" {
 		flagWebhookSecret = cfg.Export.WebhookSecret
+	}
+	if flagExportProm == "" && cfg.Export.GetPromPath() != "" {
+		flagExportProm = cfg.Export.GetPromPath()
+	}
+	if flagExportOTelEndpoint == "" && cfg.Export.GetOTelEndpoint() != "" {
+		flagExportOTelEndpoint = cfg.Export.GetOTelEndpoint()
 	}
 	if flagMaxCILatency <= 0 {
 		flagMaxCILatency = cfg.Thresholds.MaxCILatencyMinutes
@@ -624,6 +636,42 @@ func main() {
 				fmt.Fprintf(os.Stderr, "⚠️ Failed to dispatch metrics webhook: %v\n", err)
 			} else if !flagQuiet {
 				fmt.Println("✅ Metrics webhook dispatched successfully")
+			}
+		}
+
+		if flagExportProm != "" {
+			if err := exporter.ExportPrometheus(metricsPayload, flagExportProm); err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️ Failed to export Prometheus metrics: %v\n", err)
+			} else {
+				if !flagQuiet {
+					fmt.Printf("📈 Prometheus metrics exported to: %s\n", flagExportProm)
+				}
+				setGithubOutput("metrics-prom", flagExportProm)
+			}
+		}
+
+		if flagExportOTelEndpoint != "" {
+			if !flagQuiet {
+				fmt.Printf("📡 Dispatching OpenTelemetry metrics to: %s...\n", flagExportOTelEndpoint)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			headers := make(map[string]string)
+			for k, v := range cfg.Export.OTelHeaders {
+				headers[k] = v
+			}
+			for k, v := range exporter.ParseOTLPHeaders(flagExportOTelHeaders) {
+				headers[k] = v
+			}
+			err := exporter.ExportOTLP(ctx, metricsPayload, flagExportOTelEndpoint, headers)
+			cancel()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "⚠️ Failed to dispatch OpenTelemetry metrics: %v\n", err)
+				setGithubOutput("otel-status", "failure")
+			} else {
+				if !flagQuiet {
+					fmt.Println("✅ OpenTelemetry metrics dispatched successfully")
+				}
+				setGithubOutput("otel-status", "success")
 			}
 		}
 	}

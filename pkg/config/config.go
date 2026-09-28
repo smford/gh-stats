@@ -19,11 +19,32 @@ type Config struct {
 	FailOn      string            `yaml:"fail_on"`
 }
 
-// ExportConfig configures telemetry, metrics JSON export, and webhook destinations.
+// ExportConfig configures telemetry, metrics JSON export, Prometheus, OTel, and webhook destinations.
 type ExportConfig struct {
-	JSONPath      string `yaml:"json_path"`
-	WebhookURL    string `yaml:"webhook_url"`
-	WebhookSecret string `yaml:"webhook_secret"`
+	JSONPath           string            `yaml:"json_path"`
+	WebhookURL         string            `yaml:"webhook_url"`
+	WebhookSecret      string            `yaml:"webhook_secret"`
+	PromPath           string            `yaml:"prom_path"`
+	ExportProm         string            `yaml:"export_prom"`
+	OTelEndpoint       string            `yaml:"otel_endpoint"`
+	ExportOTelEndpoint string            `yaml:"export_otel_endpoint"`
+	OTelHeaders        map[string]string `yaml:"otel_headers"`
+}
+
+// GetPromPath returns the configured Prometheus export path (supporting prom_path or export_prom).
+func (e ExportConfig) GetPromPath() string {
+	if e.PromPath != "" {
+		return e.PromPath
+	}
+	return e.ExportProm
+}
+
+// GetOTelEndpoint returns the configured OpenTelemetry endpoint (supporting otel_endpoint or export_otel_endpoint).
+func (e ExportConfig) GetOTelEndpoint() string {
+	if e.OTelEndpoint != "" {
+		return e.OTelEndpoint
+	}
+	return e.ExportOTelEndpoint
 }
 
 // ThresholdsConfig configures limits for PR risk scoring and alerts.
