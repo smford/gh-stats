@@ -148,8 +148,8 @@ func SetRawMode() (func(), error) {
 	}
 	stateStr := strings.TrimSpace(string(savedState))
 
-	// Enable raw mode: unbuffered input without echo
-	rawCmd := exec.Command("stty", "raw", "-echo", "min", "1")
+	// Enable non-canonical, unbuffered input without echo, preserving output processing (onlcr)
+	rawCmd := exec.Command("stty", "-echo", "-icanon", "min", "1")
 	rawCmd.Stdin = os.Stdin
 	if err := rawCmd.Run(); err != nil {
 		// Fallback to cbreak
