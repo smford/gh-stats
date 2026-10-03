@@ -109,7 +109,7 @@ inputs:
   token:
     description: 'GitHub token for API access or SARIF upload'
     required: false
-    default: ${{ github.token }}
+    default: ''
 
 outputs:
   sarif-file:
@@ -236,8 +236,8 @@ runs:
         INPUT_SUGGEST_BUMP: ${{ inputs.suggested-bump }}
         INPUT_PUBLISH_RELEASE_NOTES: ${{ inputs.publish-release-notes }}
         INPUT_RELEASE_TAG: ${{ inputs.release-tag }}
-        INPUT_TOKEN: ${{ inputs.token }}
-        GITHUB_TOKEN: ${{ inputs.token }}
+        INPUT_TOKEN: ${{ inputs.token != '' && inputs.token || github.token }}
+        GITHUB_TOKEN: ${{ inputs.token != '' && inputs.token || github.token }}
       run: |
         (cd "${{ github.action_path }}" && go build -o /tmp/gh-stats ./cmd/gh-stats)
         /tmp/gh-stats
@@ -248,4 +248,4 @@ runs:
       with:
         sarif_file: ${{ inputs.output }}
         category: ${{ inputs.category }}
-        token: ${{ inputs.token }}
+        token: ${{ inputs.token != '' && inputs.token || github.token }}
