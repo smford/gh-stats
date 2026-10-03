@@ -239,7 +239,8 @@ runs:
         INPUT_TOKEN: ${{ inputs.token }}
         GITHUB_TOKEN: ${{ inputs.token }}
       run: |
-        go run "${{ github.action_path }}/cmd/gh-stats"
+        (cd "${{ github.action_path }}" && go build -o /tmp/gh-stats ./cmd/gh-stats)
+        /tmp/gh-stats
 
     - name: Upload SARIF to GitHub Code Scanning
       if: ${{ inputs.upload-sarif == 'true' }}
